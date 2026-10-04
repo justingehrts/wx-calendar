@@ -1,0 +1,14 @@
+{
+  "_note": "Typical peak dates are approximate (+/- 1 day). Put verified dates for a year under 'years' (name -> YYYY-MM-DD, from the IMO or AMS calendar); those override the typical dates and are shown as verified.",
+  "typical": [
+    {"name": "Quadrantids", "month": 1, "day": 3},
+    {"name": "Lyrids", "month": 4, "day": 22},
+    {"name": "Eta Aquariids", "month": 5, "day": 6},
+    {"name": "Perseids", "month": 8, "day": 12},
+    {"name": "Orionids", "month": 10, "day": 21},
+    {"name": "Leonids", "month": 11, "day": 17},
+    {"name": "Geminids", "month": 12, "day": 14},
+    {"name": "Ursids", "month": 12, "day": 22}
+  ],
+  "years": {}
+}

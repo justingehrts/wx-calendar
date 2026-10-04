@@ -1,0 +1,20 @@
+# Example for Fly.io: `fly launch --no-deploy --copy-config`, then:
+#   fly volumes create wxcal_data --size 1
+#   fly secrets set CALENDAR_PASSCODE=... LITESTREAM_REPLICA_URL=... LITESTREAM_ACCESS_KEY_ID=... LITESTREAM_SECRET_ACCESS_KEY=...
+#   fly deploy
+# Keep it to ONE machine: SQLite is a single-writer file.
+app = "wx-calendar"
+primary_region = "iad"
+
+[build]
+
+[mounts]
+  source = "wxcal_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8501
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1

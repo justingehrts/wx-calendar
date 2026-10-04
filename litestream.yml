@@ -1,0 +1,9 @@
+# Continuously replicates the SQLite file to an S3-compatible bucket (AWS S3, Backblaze B2, Cloudflare R2).
+# Set LITESTREAM_REPLICA_URL, e.g. s3://my-bucket/wx-calendar  (for B2/R2 add ?endpoint=https://...&region=auto)
+# and LITESTREAM_ACCESS_KEY_ID / LITESTREAM_SECRET_ACCESS_KEY.
+dbs:
+  - path: ${CALENDAR_DB}
+    replicas:
+      - url: ${LITESTREAM_REPLICA_URL}
+        retention: 720h        # keep 30 days of restore points
+        snapshot-interval: 24h
