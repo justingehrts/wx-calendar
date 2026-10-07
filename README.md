@@ -17,33 +17,46 @@ Location for all sun, moon and climate data: Columbus, OH (39.9612 N, 82.9988 W;
 - The PDF never silently drops an event: anything that does not fit is listed on the app screen and on the details page.
 
 ## Run locally
-    pip install -r requirements.txt
+    pip install -r requirements-dev.txt
     CALENDAR_PASSCODE=yourcode streamlit run app.py
     pytest
 
 The passcode comes from `st.secrets["passcode"]` or `CALENDAR_PASSCODE`. It keeps casual visitors out; it is not real security.
-Data lives in `data/` (`CALENDAR_DATA_DIR`, database path `CALENDAR_DB`).
+Locally, data lives in `data/` (`CALENDAR_DATA_DIR`, database path `CALENDAR_DB`).
 
-## Hosting and backups
-Streamlit Community Cloud has an **ephemeral disk**, so a SQLite file there is lost on restart. Use the included
-`Dockerfile` on a host with a **persistent volume** (Fly.io, Render, a small VM) mounted at `/data`.
-Run exactly **one** instance (SQLite is single-writer).
+## Hosting (free): Streamlit Community Cloud + Turso
+Streamlit Community Cloud wipes its disk on every restart, so the data lives in a free hosted
+[Turso](https://turso.tech) database (SQLite-compatible) instead. The app switches to it automatically when two
+secrets are present; without them it uses a local file, which is what you want on your own computer.
 
-`run.sh` starts [Litestream](https://litestream.io) when `LITESTREAM_REPLICA_URL` is set: on a fresh disk it restores the
-latest copy from the bucket, then replicates every change continuously (30 days of restore points). Environment variables:
+1. **Create the database** (Turso account, then the `turso` CLI or the dashboard):
+   `turso db create wxcal`, `turso db show wxcal --url` (the `libsql://...` address), `turso db tokens create wxcal`.
+2. **Deploy**: at share.streamlit.io choose *New app*, this repo, branch `main`, file `app.py`. Under *Advanced settings > Secrets* paste:
 
-| Variable | Purpose |
-|---|---|
-| `CALENDAR_PASSCODE` | shared passcode (required) |
-| `LITESTREAM_REPLICA_URL` | e.g. `s3://my-bucket/wx-calendar` (B2/R2: add `?endpoint=https://...&region=auto`) |
-| `LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY` | bucket credentials |
+       passcode = "pick-a-shared-passcode"
+       TURSO_DATABASE_URL = "libsql://wxcal-yourname.turso.io"
+       TURSO_AUTH_TOKEN = "the-token-from-step-1"
 
-`fly.toml` is an example for Fly.io. The container build has not been tested in the authoring environment (no Docker daemon).
-Restore by hand: `litestream restore -config litestream.yml $CALENDAR_DB`.
-The Settings tab also offers a manual database download, and Events has a CSV export.
+   Set the app to *Private* (viewers must sign in) if your plan allows it, otherwise the passcode is the only gate.
+3. **First run**: open Events > Import / export and import `Content_Idea_Calendar.xlsx`, then Settings > add the federal holidays.
+   If the app shows a red "running without a hosted database" banner, the secrets are missing or misspelled.
+4. **Backups**: the Settings tab downloads a copy of the database any time. For automatic nightly copies, add the same two
+   Turso values as *repository* secrets (GitHub > Settings > Secrets and variables > Actions); `.github/workflows/backup.yml`
+   then saves a copy as a workflow artifact every night (kept 30 days; GitHub pauses scheduled runs on repos idle for 60 days).
+   A backup file is a normal SQLite file; open it with any SQLite tool or restore by importing its events.
+
+Free tiers and limits change; check Streamlit's and Turso's current terms. The app sleeps when idle and wakes on the next visit.
+The Turso connection has been tested here only in local-file mode (all tests run against both drivers); the live connection
+and the GitHub Action are untested until you deploy.
+
+### Alternative: your own container
+`Dockerfile`, `run.sh`, `litestream.yml` and `fly.toml` run the app with a plain SQLite file on a persistent disk and
+continuous Litestream backup to an S3-compatible bucket (Fly.io, Render and similar, a few dollars a month). Run one instance only.
+Variables: `CALENDAR_PASSCODE`, `LITESTREAM_REPLICA_URL`, `LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY`.
+This path is also untested (no Docker daemon in the authoring environment).
 
 ## Data sources
-- **Sunrise/sunset**: U.S. Naval Observatory API (upper limb, standard refraction), cached per year in `data/cache/`.
+- **Sunrise/sunset**: U.S. Naval Observatory API (upper limb, standard refraction), cached per year (in `data/cache/`, or in the database when hosted).
   2026 is bundled in `reference/`. For other years use Settings > fetch (about 2 minutes). Until then, a PyEphem calculation
   with the same definition is used (it agreed with USNO to within 0.52 minute on every day of 2026) and the app says so.
 - **Moon phases and seasons**: PyEphem, converted to Eastern before taking the date.

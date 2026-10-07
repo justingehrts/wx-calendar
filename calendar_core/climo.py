@@ -1,9 +1,9 @@
 """CMH (Columbus) climate data from RCC-ACIS: daily normals (1991-2020) and period-of-record
 daily records, keyed by MM-DD so they work for any year; plus 1991-2020 threshold statistics
 used for milestone proposals."""
-import csv, datetime as dt, json, os, statistics, urllib.request
+import csv, datetime as dt, io, json, statistics, urllib.request
 from functools import lru_cache
-from . import paths
+from . import store
 
 STATION = "CMH"
 ACIS = "https://data.rcc-acis.org/StnData"
@@ -12,9 +12,6 @@ NORMALS_YEARS = (1991, 2020)
 def _post(body, timeout=90):
     r = urllib.request.Request(ACIS, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
     return json.load(urllib.request.urlopen(r, timeout=timeout))
-
-def _file(name):
-    return paths.first_existing(os.path.join(paths.CACHE, name), os.path.join(paths.REFERENCE, name))
 
 # ---- normals and records, by MM-DD
 def fetch_normals_records():
@@ -27,22 +24,19 @@ def fetch_normals_records():
             "smry": {"reduce": reduce, "add": "date"}, "smry_only": 1, "groupby": "year"}]}
         return {d[5:]: (v, d[:4]) for v, d in _post(q)["smry"][0]}
     hi, lo = por("maxt", "max"), por("mint", "min")
-    os.makedirs(paths.CACHE, exist_ok=True)
-    tmp = os.path.join(paths.CACHE, "climo_md.csv.tmp")
-    with open(tmp, "w", newline="") as f:
-        w = csv.writer(f); w.writerow(["md", "normal_high", "normal_low", "record_high", "record_high_year", "record_low", "record_low_year"])
-        for date, h, l in normals:
-            md = date[5:]; rh, rl = hi.get(md, ("", "")), lo.get(md, ("", ""))
-            w.writerow([md, round(float(h)), round(float(l)), rh[0], rh[1], rl[0], rl[1]])
-    os.replace(tmp, os.path.join(paths.CACHE, "climo_md.csv"))
+    buf = io.StringIO(); w = csv.writer(buf, lineterminator="\n")
+    w.writerow(["md", "normal_high", "normal_low", "record_high", "record_high_year", "record_low", "record_low_year"])
+    for date, h, l in normals:
+        md = date[5:]; rh, rl = hi.get(md, ("", "")), lo.get(md, ("", ""))
+        w.writerow([md, round(float(h)), round(float(l)), rh[0], rh[1], rl[0], rl[1]])
+    store.write("climo_md.csv", buf.getvalue())
     return len(normals)
 
-@lru_cache(maxsize=2)
-def _load(mtime):
-    p = _file("climo_md.csv")
-    return {r["md"]: r for r in csv.DictReader(open(p))} if p else {}
+_tbl = {}
 def table():
-    p = _file("climo_md.csv"); return _load(os.path.getmtime(p) if p else 0)
+    text = store.load_text("climo_md.csv")
+    if _tbl.get("src") is not text: _tbl.update(src=text, rows={r["md"]: r for r in csv.DictReader(io.StringIO(text))} if text else {})
+    return _tbl["rows"]
 
 def day(d):
     """dict with normal_high, normal_low, record_high, record_low (strings) or None."""
@@ -92,12 +86,10 @@ def fetch_stats():
                     "thresholds": {"freeze": "min temp <= 32F", "hot90": "max temp >= 90F", "hot80": "max temp >= 80F",
                                    "snow_meas": "snowfall >= 0.1 in", "snow_1in": "snowfall >= 1.0 in"},
                     "note": "Averages are the mean date over 1991-2020. Snow seasons run Jul 1-Jun 30 (29 full seasons); trace counts as 0; missing days ignored."}
-    os.makedirs(paths.CACHE, exist_ok=True)
-    json.dump(out, open(os.path.join(paths.CACHE, "climo_stats.json"), "w"), indent=1)
+    store.write("climo_stats.json", json.dumps(out, indent=1))
     return out
 
-def stats():
-    p = _file("climo_stats.json"); return json.load(open(p)) if p else {}
+def stats(): return store.load_json("climo_stats.json") or {}
 
 def _ref(key, y, d):
     """Reference date for offsets: Jul 1 of the season year for snow, Jan 1 of the year otherwise."""

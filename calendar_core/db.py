@@ -1,6 +1,6 @@
 """SQLite storage (WAL mode). All data access goes through this module so the backend can be
 swapped later if hosting requires it."""
-import datetime as dt, json, os, sqlite3
+import datetime as dt, json, os, sqlite3, tempfile
 from . import recurrence
 
 DB_PATH = os.environ.get("CALENDAR_DB", os.path.join(os.path.dirname(__file__), "..", "data", "calendar.db"))
@@ -34,17 +34,48 @@ CREATE TABLE IF NOT EXISTS history(
 CREATE TABLE IF NOT EXISTS milestone_decisions(
   key TEXT PRIMARY KEY, status TEXT NOT NULL, decided_at TEXT NOT NULL, event_id INTEGER);
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS cache_files(name TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
 """
 EDITABLE = ["title", "start_date", "end_date", "category_id", "time", "location", "notes", "url", "detail_only", "flag"]
 
-def connect(path=None):
-    path = path or DB_PATH
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    con = sqlite3.connect(path, timeout=30)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA busy_timeout=30000")
-    con.execute("PRAGMA foreign_keys=ON")
+# ----------------------------------------------------------------- backends
+# Default: a local SQLite file (WAL mode). If TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are set, the data
+# lives in a hosted Turso database (SQLite-compatible) through an embedded replica, so it survives hosts
+# with ephemeral disks such as Streamlit Community Cloud.
+class Row(dict):
+    """Dict row that also supports row[0], like sqlite3.Row."""
+    def __getitem__(self, k): return list(self.values())[k] if isinstance(k, int) else dict.__getitem__(self, k)
+
+class _Cursor:
+    def __init__(self, cur):
+        self._c = cur
+        self.lastrowid = getattr(cur, "lastrowid", None); self.rowcount = getattr(cur, "rowcount", -1)
+        self._names = [d[0] for d in cur.description] if cur.description else []
+    def _row(self, t): return None if t is None else Row(zip(self._names, t))
+    def fetchone(self): return self._row(self._c.fetchone())
+    def fetchall(self): return [self._row(t) for t in self._c.fetchall()]
+    def __iter__(self): return iter(self.fetchall())
+
+class LibsqlConn:
+    """Gives a libsql connection the small slice of the sqlite3 API this app uses."""
+    is_libsql = True
+    def __init__(self, raw): self._raw = raw
+    def execute(self, sql, params=()): return _Cursor(self._raw.execute(sql, tuple(params)))
+    def executescript(self, sql): self._raw.executescript(sql)
+    def commit(self): self._raw.commit()
+    def rollback(self): self._raw.rollback()
+    def close(self): self._raw.close()
+    def sync(self): self._raw.sync()
+
+def turso_config():
+    url, tok = os.environ.get("TURSO_DATABASE_URL"), os.environ.get("TURSO_AUTH_TOKEN")
+    return (url, tok) if url and tok else None
+
+_initialised = set()
+
+def _init_schema(con, key):
+    """Create tables / migrate / seed once per process (not on every Streamlit rerun)."""
+    if key in _initialised: return
     con.executescript(SCHEMA)
     cols = {r["name"] for r in con.execute("PRAGMA table_info(events)")}   # migrate older files
     for c, ddl in (("detail_only", "INTEGER NOT NULL DEFAULT 0"), ("flag", "TEXT")):
@@ -52,7 +83,28 @@ def connect(path=None):
     if not con.execute("SELECT 1 FROM categories LIMIT 1").fetchone():
         for i, (n, c, s, k) in enumerate(DEFAULT_CATEGORIES):
             con.execute("INSERT INTO categories(name,color_hex,bw_style,keywords,sort_order) VALUES(?,?,?,?,?)", (n, c, s, k, i))
-    con.commit()
+    con.commit(); _initialised.add(key)
+
+def connect(path=None, libsql=False):
+    """Open the database. `libsql=True` forces the libsql driver on a local file (used by the tests);
+    Turso settings in the environment select the hosted database."""
+    turso = turso_config()
+    path = path or (os.path.join(tempfile.gettempdir(), "wxcal_replica.db") if turso else DB_PATH)
+    if turso or libsql:
+        import libsql as _l
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        raw = _l.connect(path, sync_url=turso[0], auth_token=turso[1]) if turso else _l.connect(path)
+        con = LibsqlConn(raw)
+        if turso: con.sync()                 # pick up other people's changes
+        _init_schema(con, ("libsql", turso[0] if turso else os.path.abspath(path)))
+        return con
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    con = sqlite3.connect(path, timeout=30)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA busy_timeout=30000")
+    con.execute("PRAGMA foreign_keys=ON")
+    _init_schema(con, ("sqlite", os.path.abspath(path)))
     return con
 
 def now(): return dt.datetime.now().isoformat(timespec="seconds")
@@ -245,8 +297,16 @@ def carry_forward(con, items):
     return n
 
 def backup_bytes(con):
-    """A consistent copy of the whole database (SQLite online backup) as bytes."""
+    """A consistent copy of the whole database as a SQLite file (bytes)."""
     import tempfile
     with tempfile.TemporaryDirectory() as d:
-        p = os.path.join(d, "backup.db"); dst = sqlite3.connect(p); con.backup(dst); dst.close()
-        return open(p, "rb").read()
+        p = os.path.join(d, "backup.db"); dst = sqlite3.connect(p)
+        if isinstance(con, sqlite3.Connection): con.backup(dst)
+        else:      # libsql: copy schema and rows table by table
+            for r in con.execute("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'libsql_%'"):
+                dst.execute(r["sql"]); rows = con.execute(f'SELECT * FROM "{r["name"]}"').fetchall()
+                if rows:
+                    cols = list(rows[0].keys())
+                    dst.executemany(f'INSERT INTO "{r["name"]}"({",".join(cols)}) VALUES({",".join("?" * len(cols))})', [tuple(x.values()) for x in rows])
+            dst.commit()
+        dst.close(); return open(p, "rb").read()

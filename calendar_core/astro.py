@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 import ephem
-from . import paths
+from . import store
 
 LAT, LON, ELEV = "39.9612", "-82.9988", 235
 ET, UTC = ZoneInfo("America/New_York"), ZoneInfo("UTC")
@@ -20,15 +20,9 @@ def _obs():
 def to_et(e): return e.datetime().replace(tzinfo=UTC).astimezone(ET)
 def _utc_midnight_et(d): return ephem.Date(dt.datetime.combine(d, dt.time(0), tzinfo=ET).astimezone(UTC).replace(tzinfo=None))
 
-# ---- USNO cache
-def usno_path(year): return os.path.join(paths.CACHE, f"astro_usno_{year}.json")
-@lru_cache(maxsize=8)
-def _usno_cached(year, mtime):
-    p = paths.first_existing(usno_path(year), os.path.join(paths.REFERENCE, f"astro_usno_{year}.json"))
-    return json.load(open(p)) if p else {}
-def usno_data(year):
-    p = paths.first_existing(usno_path(year), os.path.join(paths.REFERENCE, f"astro_usno_{year}.json"))
-    return _usno_cached(year, os.path.getmtime(p) if p else 0)
+# ---- USNO cache (see store.py)
+def usno_name(year): return f"astro_usno_{year}.json"
+def usno_data(year): return store.load_json(usno_name(year)) or {}
 
 def _fetch_day(d):
     off = int(dt.datetime(d.year, d.month, d.day, 12, tzinfo=ET).utcoffset().total_seconds() // 3600)
@@ -51,9 +45,7 @@ def fetch_usno_year(year, progress=None, workers=4):
         done[0] += 1
         if progress: progress(done[0], len(days))
     with ThreadPoolExecutor(workers) as ex: list(ex.map(work, days))
-    if out:
-        os.makedirs(paths.CACHE, exist_ok=True)
-        tmp = usno_path(year) + ".tmp"; json.dump(dict(sorted(out.items())), open(tmp, "w")); os.replace(tmp, usno_path(year))
+    if out: store.write(usno_name(year), json.dumps(dict(sorted(out.items()))))
     return len(out)
 
 # ---- sun times

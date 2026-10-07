@@ -1,0 +1,21 @@
+# Nightly backup of the hosted database, kept as a workflow artifact for 30 days.
+# Needs repository secrets TURSO_DATABASE_URL and TURSO_AUTH_TOKEN (Settings > Secrets and variables > Actions).
+# Note: GitHub pauses scheduled workflows on repos with no activity for 60 days; re-enable them from the Actions tab.
+name: Nightly database backup
+on:
+  schedule: [{ cron: "17 7 * * *" }]
+  workflow_dispatch:
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install libsql
+      - run: python scripts/backup.py calendar_backup.db
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with: { name: calendar-backup, path: calendar_backup.db, retention-days: 30 }

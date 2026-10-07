@@ -184,3 +184,15 @@ def test_holidays_idempotent_and_rollover(con):
 
 def test_backup_bytes(con):
     db.add_event(con, "x", "2026-01-01"); assert db.backup_bytes(con)[:15] == b"SQLite format 3"
+
+
+def test_store_roundtrip_file_and_database_modes(tmp_path, monkeypatch):
+    from calendar_core import store, paths
+    monkeypatch.setattr(paths, "CACHE", str(tmp_path / "cache"))
+    store._mem.clear(); store.write("x.json", '{"a": 1}'); assert store.load_json("x.json") == {"a": 1} and store.has_cached("x.json")
+    assert store.load_text("astro_usno_2026.json")            # bundled reference file is the fallback
+    # database mode: same API, backed by the cache_files table (libsql local file stands in for Turso)
+    c = db.connect(str(tmp_path / "remote.db"), libsql=True)
+    monkeypatch.setattr(store, "_remote", lambda: True); monkeypatch.setattr(db, "connect", lambda *a, **k: c)
+    store._mem.clear(); store.write("y.json", '{"b": 2}'); assert store.load_json("y.json") == {"b": 2} and store.has_cached("y.json")
+    store.write("y.json", '{"b": 3}'); store._mem.clear(); assert store.load_json("y.json") == {"b": 3}

@@ -5,6 +5,12 @@ from calendar_core import astro, climo, db, ical, importers, milestones, pattern
 
 st.set_page_config(page_title="Weathercast Planning Calendar", layout="wide")
 
+# Hosted database settings may come from Streamlit secrets; the storage layer reads the environment.
+for _k in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
+    try:
+        if _k in st.secrets: os.environ.setdefault(_k, str(st.secrets[_k]))
+    except Exception: pass
+
 # ------------------------------------------------------------------ passcode
 def passcode():
     try: return st.secrets["passcode"]
@@ -25,6 +31,9 @@ def gate():
 
 gate()
 con = db.connect()
+if not db.turso_config() and os.path.abspath(__file__).startswith("/mount/src"):
+    st.error("This app is running on Streamlit Community Cloud without a hosted database. Anything you enter will be LOST "
+             "on the next restart. Add TURSO_DATABASE_URL and TURSO_AUTH_TOKEN to the app's secrets (see the README).")
 cats = db.categories(con)
 cat_names = [c["name"] for c in cats]
 cat_by_name = {c["name"]: c for c in cats}
@@ -300,5 +309,6 @@ with tab_set:
             n = db.carry_forward(con, items); snapshot(); st.success(f"Created {n} event(s) in {year + 1}.")
     else: st.caption("No one-time events in " + str(year) + ".")
     st.divider(); st.subheader("Backup")
+    st.write("Data storage: **" + ("hosted Turso database" if db.turso_config() else "local file on this server") + "**")
     st.download_button("Download a copy of the database", db.backup_bytes(con), "calendar_backup.db", "application/octet-stream")
     st.caption("On the hosted app, nightly backups run automatically (see README); this is an extra manual copy.")
