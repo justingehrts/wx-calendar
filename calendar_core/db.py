@@ -54,6 +54,7 @@ class _Cursor:
     def _row(self, t): return None if t is None else Row(zip(self._names, t))
     def fetchone(self): return self._row(self._c.fetchone())
     def fetchall(self): return [self._row(t) for t in self._c.fetchall()]
+    def fetchall_tuples(self): return [tuple(t) for t in self._c.fetchall()]
     def __iter__(self): return iter(self.fetchall())
 
 class LibsqlConn:
@@ -77,10 +78,10 @@ def _init_schema(con, key):
     """Create tables / migrate / seed once per process (not on every Streamlit rerun)."""
     if key in _initialised: return
     con.executescript(SCHEMA)
-    cols = {r["name"] for r in con.execute("PRAGMA table_info(events)")}   # migrate older files
+    cols = {t[1] for t in _tuples(con, "PRAGMA table_info(events)")}   # migrate older files
     for c, ddl in (("detail_only", "INTEGER NOT NULL DEFAULT 0"), ("flag", "TEXT")):
         if c not in cols: con.execute(f"ALTER TABLE events ADD COLUMN {c} {ddl}")
-    if not con.execute("SELECT 1 FROM categories LIMIT 1").fetchone():
+    if not _tuples(con, "SELECT 1 FROM categories LIMIT 1"):
         for i, (n, c, s, k) in enumerate(DEFAULT_CATEGORIES):
             con.execute("INSERT INTO categories(name,color_hex,bw_style,keywords,sort_order) VALUES(?,?,?,?,?)", (n, c, s, k, i))
     con.commit(); _initialised.add(key)
@@ -110,11 +111,13 @@ def connect(path=None, libsql=False):
 def now(): return dt.datetime.now().isoformat(timespec="seconds")
 
 # ---------------------------------------------------------------- categories
-def categories(con): return [dict(r) for r in con.execute("SELECT * FROM categories ORDER BY sort_order,id")]
+CAT_COLS = ["id", "name", "color_hex", "bw_style", "keywords", "sort_order"]
+def categories(con):
+    return _named(con, "SELECT " + ",".join(CAT_COLS) + " FROM categories ORDER BY sort_order,id", (), CAT_COLS)
 
 def category_id_by_name(con, name):
-    r = con.execute("SELECT id FROM categories WHERE name=?", (name,)).fetchone()
-    return r["id"] if r else None
+    r = _tuples(con, "SELECT id FROM categories WHERE name=?", (name,))
+    return r[0][0] if r else None
 
 def categorize(con, title):
     """First category whose keywords match the title (case-insensitive); else the fallback."""
@@ -124,9 +127,10 @@ def categorize(con, title):
     return category_id_by_name(con, FALLBACK_CATEGORY) or categories(con)[0]["id"]
 
 def add_category(con, name, color_hex="#444444", bw_style="light_gray", keywords=""):
-    order = (con.execute("SELECT COALESCE(MAX(sort_order),-1)+1 FROM categories").fetchone()[0])
-    cur = con.execute("INSERT INTO categories(name,color_hex,bw_style,keywords,sort_order) VALUES(?,?,?,?,?)",
-                      (name, color_hex, bw_style, keywords, order)); con.commit(); return cur.lastrowid
+    order = _tuples(con, "SELECT COALESCE(MAX(sort_order),-1)+1 FROM categories")[0][0]
+    rid = _insert(con, "INSERT INTO categories(name,color_hex,bw_style,keywords,sort_order) VALUES(?,?,?,?,?)",
+                  (name, color_hex, bw_style, keywords, order), "SELECT id FROM categories WHERE name=?", (name,))
+    con.commit(); return rid
 
 def update_category(con, cid, **f):
     f = {k: v for k, v in f.items() if k in ("name", "color_hex", "bw_style", "keywords", "sort_order")}
@@ -147,25 +151,46 @@ def category_counts(con, year, month):
     return out
 
 # -------------------------------------------------------------------- events
-def _row(con, r):
-    d = dict(r)
-    d["rule"] = json.loads(d.pop("params_json")) if d.get("params_json") else None
-    if d["rule"] is not None: d["rule"]["kind"] = d.pop("kind")
-    else: d.pop("kind", None)
+EVENT_COLS = ["id", "title", "start_date", "end_date", "category_id", "rule_id", "time", "location", "notes", "url",
+              "detail_only", "flag", "created_at", "updated_at", "deleted_at"]
+_NAMES = EVENT_COLS + ["category", "kind", "params_json"]
+
+def _tuples(con, sql, params=()):
+    """Rows as plain tuples (no column names involved)."""
+    cur = con.execute(sql, params)
+    return cur.fetchall_tuples() if hasattr(cur, "fetchall_tuples") else [tuple(r) for r in cur.fetchall()]
+
+def _insert(con, sql, params, lookup_sql, lookup_params):
+    """INSERT and return the new row id. The id is looked up by content, because hosted libsql connections
+    do not reliably report lastrowid; falls back to lastrowid if the lookup finds nothing."""
+    cur = con.execute(sql, params)
+    found = _tuples(con, lookup_sql, lookup_params)
+    return found[0][0] if found else cur.lastrowid
+
+def _named(con, sql, params, cols):
+    """Run a query and name the columns by position, independent of what the driver reports for column
+    names (hosted libsql connections have returned unexpected names for wildcard selects)."""
+    cur = con.execute(sql, params)
+    raw = cur.fetchall_tuples() if hasattr(cur, "fetchall_tuples") else [tuple(r) for r in cur.fetchall()]
+    return [dict(zip(cols, t)) for t in raw]
+
+def _row(d):
+    d = dict(d); pj, kind = d.pop("params_json"), d.pop("kind")
+    d["rule"] = {**json.loads(pj), "kind": kind} if pj else None
     return d
 
-_SEL = ("SELECT e.*, c.name AS category, r.kind AS kind, r.params_json AS params_json FROM events e "
+_SEL = ("SELECT " + ",".join("e." + c for c in EVENT_COLS) + ", c.name, r.kind, r.params_json FROM events e "
         "LEFT JOIN categories c ON c.id=e.category_id LEFT JOIN rules r ON r.id=e.rule_id")
 
 def get_event(con, event_id):
-    r = con.execute(_SEL + " WHERE e.id=?", (event_id,)).fetchone()
-    return _row(con, r) if r else None
+    rows = _named(con, _SEL + " WHERE e.id=?", (event_id,), _NAMES)
+    return _row(rows[0]) if rows else None
 
 def events(con, include_deleted=False, only_deleted=False):
     q = _SEL
     if only_deleted: q += " WHERE e.deleted_at IS NOT NULL"
     elif not include_deleted: q += " WHERE e.deleted_at IS NULL"
-    return [_row(con, r) for r in con.execute(q + " ORDER BY e.start_date, e.title")]
+    return [_row(r) for r in _named(con, q + " ORDER BY e.start_date, e.title", (), _NAMES)]
 
 def _log(con, event_id, action, before, after):
     con.execute("INSERT INTO history(event_id,at,action,before_json,after_json) VALUES(?,?,?,?,?)",
@@ -179,17 +204,20 @@ def _snap(e):
 def _set_rule(con, rule):
     if not rule or rule.get("kind") == "one_off": return None
     p = {k: v for k, v in rule.items() if k != "kind"}
-    return con.execute("INSERT INTO rules(kind,params_json) VALUES(?,?)", (rule["kind"], json.dumps(p))).lastrowid
+    pj = json.dumps(p)
+    return _insert(con, "INSERT INTO rules(kind,params_json) VALUES(?,?)", (rule["kind"], pj),
+                   "SELECT id FROM rules WHERE kind=? AND params_json=? ORDER BY id DESC LIMIT 1", (rule["kind"], pj))
 
 def add_event(con, title, start, end=None, category_id=None, rule=None, log=True, **kw):
-    t = now()
-    cur = con.execute(
+    t = now(); start = str(start)
+    eid = _insert(con,
         "INSERT INTO events(title,start_date,end_date,category_id,rule_id,time,location,notes,url,detail_only,flag,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (title, str(start), str(end) if end and str(end) != str(start) else None,
+        (title, start, str(end) if end and str(end) != start else None,
          category_id or categorize(con, title), _set_rule(con, rule), kw.get("time"), kw.get("location"),
-         kw.get("notes"), kw.get("url"), int(bool(kw.get("detail_only"))), kw.get("flag"), t, t))
-    if log: _log(con, cur.lastrowid, "create", None, _snap(get_event(con, cur.lastrowid)))
-    con.commit(); return cur.lastrowid
+         kw.get("notes"), kw.get("url"), int(bool(kw.get("detail_only"))), kw.get("flag"), t, t),
+        "SELECT id FROM events WHERE created_at=? AND title=? AND start_date=? ORDER BY id DESC LIMIT 1", (t, title, start))
+    if log: _log(con, eid, "create", None, _snap(get_event(con, eid)))
+    con.commit(); return eid
 
 def update_event(con, event_id, expect_updated_at=None, **fields):
     """Update fields (and `rule=` dict/None). If expect_updated_at is given and the row has changed
@@ -225,15 +253,18 @@ def events_on_day(con, day):
     return [e for e in events(con) if day in recurrence.occurrence_dates(e, day.year)]
 
 # ------------------------------------------------------------- history / undo
+HISTORY_COLS = ["id", "event_id", "at", "action", "before_json", "after_json", "undone"]
+
 def history(con, limit=100):
-    q = ("SELECT h.*, e.title AS title FROM history h LEFT JOIN events e ON e.id=h.event_id "
-         "ORDER BY h.id DESC LIMIT ?")
-    return [dict(r) for r in con.execute(q, (limit,))]
+    q = ("SELECT " + ",".join("h." + c for c in HISTORY_COLS) + ", e.title FROM history h "
+         "LEFT JOIN events e ON e.id=h.event_id ORDER BY h.id DESC LIMIT ?")
+    return _named(con, q, (limit,), HISTORY_COLS + ["title"])
 
 def undo_last(con):
     """Revert the most recent change that has not been undone. Returns a description or None."""
-    h = con.execute("SELECT * FROM history WHERE undone=0 ORDER BY id DESC LIMIT 1").fetchone()
-    if not h: return None
+    rows = _named(con, "SELECT " + ",".join(HISTORY_COLS) + " FROM history WHERE undone=0 ORDER BY id DESC LIMIT 1", (), HISTORY_COLS)
+    if not rows: return None
+    h = rows[0]
     before = json.loads(h["before_json"]) if h["before_json"] else None
     eid = h["event_id"]
     if before is None:      # undoing a create -> move to trash
@@ -249,7 +280,7 @@ def undo_last(con):
 
 # ----------------------------------------------------------------- milestones
 def milestone_status(con):
-    return {r["key"]: r["status"] for r in con.execute("SELECT key,status FROM milestone_decisions")}
+    return {k: v for k, v in _tuples(con, "SELECT key,status FROM milestone_decisions")}
 
 def decide_milestone(con, key, status, event_id=None):
     con.execute("INSERT OR REPLACE INTO milestone_decisions(key,status,decided_at,event_id) VALUES(?,?,?,?)",
@@ -257,8 +288,8 @@ def decide_milestone(con, key, status, event_id=None):
 
 # ------------------------------------------------------------------- settings
 def get_setting(con, key, default=None):
-    r = con.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
-    return json.loads(r["value"]) if r else default
+    r = _tuples(con, "SELECT value FROM settings WHERE key=?", (key,))
+    return json.loads(r[0][0]) if r else default
 
 def set_setting(con, key, value):
     con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (key, json.dumps(value))); con.commit()
@@ -303,10 +334,9 @@ def backup_bytes(con):
         p = os.path.join(d, "backup.db"); dst = sqlite3.connect(p)
         if isinstance(con, sqlite3.Connection): con.backup(dst)
         else:      # libsql: copy schema and rows table by table
-            for r in con.execute("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'libsql_%'"):
-                dst.execute(r["sql"]); rows = con.execute(f'SELECT * FROM "{r["name"]}"').fetchall()
-                if rows:
-                    cols = list(rows[0].keys())
-                    dst.executemany(f'INSERT INTO "{r["name"]}"({",".join(cols)}) VALUES({",".join("?" * len(cols))})', [tuple(x.values()) for x in rows])
+            for name, sql in _tuples(con, "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'libsql_%'"):
+                dst.execute(sql); cols = [t[1] for t in _tuples(con, f'PRAGMA table_info("{name}")')]
+                rows = _tuples(con, f'SELECT {",".join(cols)} FROM "{name}"')
+                if rows: dst.executemany(f'INSERT INTO "{name}"({",".join(cols)}) VALUES({",".join("?" * len(cols))})', rows)
             dst.commit()
         dst.close(); return open(p, "rb").read()

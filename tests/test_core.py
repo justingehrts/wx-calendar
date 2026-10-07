@@ -196,3 +196,30 @@ def test_store_roundtrip_file_and_database_modes(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "_remote", lambda: True); monkeypatch.setattr(db, "connect", lambda *a, **k: c)
     store._mem.clear(); store.write("y.json", '{"b": 2}'); assert store.load_json("y.json") == {"b": 2} and store.has_cached("y.json")
     store.write("y.json", '{"b": 3}'); store._mem.clear(); assert store.load_json("y.json") == {"b": 3}
+
+
+class _HostileCursor:
+    """Mimics a hosted connection that reports no column names and no lastrowid."""
+    def __init__(self, c): self._c = c; self.description = None; self.lastrowid = None; self.rowcount = -1
+    def fetchall(self): return self._c.fetchall()
+    def fetchone(self): return self._c.fetchone()
+
+class _HostileRaw:
+    def __init__(self, raw): self._r = raw
+    def execute(self, sql, params=()): return _HostileCursor(self._r.execute(sql, params))
+    def __getattr__(self, n): return getattr(self._r, n)
+
+def test_nothing_depends_on_driver_column_names_or_lastrowid(tmp_path):
+    con = db.connect(str(tmp_path / "h.db"), libsql=True); con._raw = _HostileRaw(con._raw)
+    cid = db.add_category(con, "Test cat"); assert cid
+    i = db.add_event(con, "Clippers", "2026-10-10", "2026-10-12")
+    j = db.add_event(con, "Xmas", "2026-12-25", rule={"kind": "yearly_fixed", "month": 12, "day": 25})
+    assert i and j and i != j
+    assert db.get_event(con, j)["rule"] == {"kind": "yearly_fixed", "month": 12, "day": 25}
+    assert [h["action"] for h in db.history(con)] == ["create", "create"] and db.history(con)[0]["at"]
+    db.update_event(con, i, title="Clippers!"); assert db.undo_last(con).startswith("Undid update")
+    assert db.get_event(con, i)["title"] == "Clippers" and db.category_id_by_name(con, "Test cat") == cid
+    assert [e["title"] for e in db.events(con)] == ["Clippers", "Xmas"] and len(db.categories(con)) == 6
+    db.set_setting(con, "k", {"a": 1}); assert db.get_setting(con, "k") == {"a": 1}
+    db.decide_milestone(con, "m1", "rejected"); assert db.milestone_status(con) == {"m1": "rejected"}
+    assert db.backup_bytes(con)[:15] == b"SQLite format 3"

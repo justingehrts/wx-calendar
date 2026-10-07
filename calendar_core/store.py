@@ -11,8 +11,8 @@ def _remote(): return db.turso_config() is not None
 
 def _read_raw(name):
     if _remote():
-        r = db.connect().execute("SELECT value, updated_at FROM cache_files WHERE name=?", (name,)).fetchone()
-        if r: return r["value"], r["updated_at"]
+        r = db._tuples(db.connect(), "SELECT value, updated_at FROM cache_files WHERE name=?", (name,))
+        if r: return r[0][0], r[0][1]
     else:
         p = os.path.join(paths.CACHE, name)
         if os.path.exists(p): return open(p).read(), str(os.path.getmtime(p))
