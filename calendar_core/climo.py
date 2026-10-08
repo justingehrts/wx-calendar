@@ -125,23 +125,23 @@ def fetch_stats():
 
 def stats(): return store.load_json(STATS_FILE) or {}
 
-def _ref(key, y, d):
-    """Reference date for offsets: Jul 1 of the season year for snow, Jan 1 of the year otherwise."""
-    return dt.date(y, 7, 1) if "snow" in key else dt.date(d.year, 1, 1)
+def _base(key):
+    """Reference day for offsets, in a non-leap year so Feb 29 never skews dates: Jul 1 for snow seasons, Jan 1 otherwise."""
+    return dt.date(2001, 7, 1) if "snow" in key else dt.date(2001, 1, 1)
 
 def _offsets(key, series):
+    """[(offset_days, actual_date)]; the offset is measured on a leap-free calendar (Feb 29 counts as Feb 28)."""
     out = []
     for y, iso in series.items():
-        d = dt.date.fromisoformat(iso); out.append(((d - _ref(key, int(y), d)).days, d))
+        d = dt.date.fromisoformat(iso); day = 28 if (d.month, d.day) == (2, 29) else d.day
+        ref_year = (2001 if d.month >= 7 else 2002) if "snow" in key else 2001
+        out.append(((dt.date(ref_year, d.month, day) - _base(key)).days, d))
     return out
 
 def place(key, target_year, offset):
-    """Calendar date in `target_year` that sits `offset` days after the series' reference date."""
-    if "snow" in key:      # offsets run from Jul 1; try the season starting last year and this year
-        for base in (target_year, target_year - 1):
-            d = dt.date(base, 7, 1) + dt.timedelta(days=offset)
-            if d.year == target_year: return d
-    return dt.date(target_year, 1, 1) + dt.timedelta(days=offset)
+    """The same month/day in `target_year` for an offset from the series' reference day."""
+    d = _base(key) + dt.timedelta(days=offset)
+    return dt.date(target_year, d.month, d.day)
 
 def summary(key, target_year, st=None):
     """(mean_date, earliest, latest) mapped into `target_year`. mean: average over 1991-2020. earliest/latest:
@@ -152,5 +152,5 @@ def summary(key, target_year, st=None):
     mean = place(key, target_year, round(statistics.mean(o for o, _ in _offsets(key, series))))
     rec = st.get("record", {}).get(key) or series
     offs = _offsets(key, rec); years = sorted(int(y) for y in rec)
-    lo, hi = min(offs, key=lambda t: t[0]), max(offs, key=lambda t: t[0])
+    lo = min(offs, key=lambda t: (t[0], -t[1].year)); hi = max(offs, key=lambda t: (t[0], t[1].year))   # ties: most recent year
     return mean, (place(key, target_year, lo[0]), lo[1].year, years[0], years[-1]), (place(key, target_year, hi[0]), hi[1].year, years[0], years[-1])

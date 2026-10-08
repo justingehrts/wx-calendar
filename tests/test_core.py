@@ -288,3 +288,14 @@ def test_old_climo_extremes_can_be_retired_and_reproposed(con):
     assert [e["id"] for _, e in db.outdated_climo_milestones(con)] == [i]
     assert db.retire_outdated_climo_milestones(con) == 1
     assert [e["title"] for e in db.events(con)] == ["Avg first 1\" snow"] and len(db.events(con, only_deleted=True)) == 1
+
+
+def test_leap_year_dates_are_not_shifted():
+    from calendar_core import climo
+    st = climo.stats()
+    assert st["record"]["last_snow_1in"]["1907"] == "1908-04-30" and st["record"]["last_freeze"]["2016"] == "2016-05-16"
+    assert climo.summary("last_snow_1in", 2026, st)[2][0] == D(2026, 4, 30)        # Apr 30, 1908 (leap year) stays Apr 30
+    assert climo.summary("last_freeze", 2026, st)[2][0] == D(2026, 5, 16)           # May 16, 2016 (leap year) stays May 16
+    assert climo.summary("last_freeze", 2028, st)[2][0] == D(2028, 5, 16)
+    assert climo.summary("last_freeze", 2026, st)[2][1] == 2016                      # May 16 also happened in 1959: tie shows the most recent year
+    assert climo.place("last_freeze", 2026, 0) == D(2026, 1, 1) and climo.place("first_snow_1in", 2024, (D(2001, 2, 28) - D(2001, 7, 1)).days + 365) == D(2024, 2, 28)
