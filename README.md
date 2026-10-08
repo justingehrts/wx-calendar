@@ -71,4 +71,4 @@ This path is also untested (no Docker daemon in the authoring environment).
     calendar_core/          db, recurrence, astro, climo, milestones, render_pdf, patterns, importers, ical, preview
     reference/              bundled 2026 sun data, climo tables, meteor table
     tests/                  pytest suite
-    scripts/legacy/         the original prototype scripts (superseded by calendar_core)
+    scripts/backup.py       database backup used by the nightly GitHub Action
