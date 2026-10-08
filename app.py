@@ -4,7 +4,7 @@ import streamlit as st
 from calendar_core import astro, climo, db, ical, importers, milestones, patterns, preview, recurrence, render_pdf as R
 
 st.set_page_config(page_title="Weathercast Planning Calendar", layout="wide")
-APP_VERSION = "2026-10-08c"
+APP_VERSION = "2026-10-08d"
 
 # Hosted database settings may come from Streamlit secrets; the storage layer reads the environment.
 for _k in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
@@ -235,8 +235,16 @@ with tab_cats:
 
 # ---------------------------------------------------------------- milestones
 with tab_ms:
+    old = db.outdated_climo_milestones(con)
+    if old:
+        st.warning(f"{len(old)} accepted climo entr{'y was' if len(old) == 1 else 'ies were'} calculated from 1991-2020 only, so the "
+                   "\"earliest/latest\" dates are wrong (e.g. the earliest 1\" snow is not Oct 30). Corrected versions use the full record: "
+                   + "; ".join(f"{e['title']} ({e['start_date']})" for _, e in old))
+        if st.button("Move these to the trash and propose corrected versions"):
+            n = db.retire_outdated_climo_milestones(con); snapshot()
+            st.session_state["msg"] = ("success", f"Moved {n} event(s) to the trash (restorable). Corrected proposals are below."); st.rerun()
     st.caption(f"Proposed entries for {year}: sun, sky, DST and climate milestones. Accept to add to the calendar; rejected ones do not come back. "
-               "Climo dates are mean dates over 1991-2020 at Columbus Area (CMHthr): last/first 32° freeze (min temp), 80°/90° days (max temp), measurable (≥0.1\") and ≥1\" snowfall.")
+               "Climo averages are mean dates over 1991-2020 and earliest/latest are over the full record (about 1880 on) at Columbus Area (CMHthr): last/first 32° freeze (min temp), 80°/90° days (max temp), measurable (≥0.1\") and ≥1\" snowfall.")
     pend = milestones.pending(con, year)
     if not pend: st.success("Nothing pending for this year.")
     else:

@@ -286,6 +286,23 @@ def decide_milestone(con, key, status, event_id=None):
     con.execute("INSERT OR REPLACE INTO milestone_decisions(key,status,decided_at,event_id) VALUES(?,?,?,?)",
                 (key, status, now(), event_id)); con.commit()
 
+_OLD_EXTREME = "(key LIKE 'climo:%:earliest:%' OR key LIKE 'climo:%:latest:%')"   # computed from 1991-2020 only (superseded)
+
+def outdated_climo_milestones(con):
+    """Accepted climo earliest/latest events made before extremes used the full record: [(key, event)]."""
+    out = []
+    for key, eid in _tuples(con, f"SELECT key, event_id FROM milestone_decisions WHERE status='accepted' AND {_OLD_EXTREME}"):
+        e = get_event(con, eid) if eid else None
+        if e and not e["deleted_at"]: out.append((key, e))
+    return out
+
+def retire_outdated_climo_milestones(con):
+    """Move those events to the trash (restorable) and forget the old decisions so corrected proposals appear."""
+    items = outdated_climo_milestones(con)
+    for _, e in items: delete_event(con, e["id"])
+    con.execute(f"DELETE FROM milestone_decisions WHERE {_OLD_EXTREME}"); con.commit()
+    return len(items)
+
 # ------------------------------------------------------------------- settings
 def get_setting(con, key, default=None):
     r = _tuples(con, "SELECT value FROM settings WHERE key=?", (key,))

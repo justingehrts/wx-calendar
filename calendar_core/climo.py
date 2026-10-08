@@ -7,7 +7,7 @@ from . import store
 
 STATION = "CMHthr"   # "Columbus Area" threaded record (what NWS climate pages use); plain "CMH" is the airport alone
 MD_FILE = f"climo_{STATION}_md.csv"
-STATS_FILE = f"climo_{STATION}_stats.json"
+STATS_FILE = f"climo_{STATION}_stats_v2.json"   # v2: adds whole-record extremes; old cached copies are ignored
 ACIS = "https://data.rcc-acis.org/StnData"
 NORMALS_YEARS = (1991, 2020)
 
@@ -52,42 +52,74 @@ def line(d, records=True, normals=True):
     if records and r.get("record_high") not in (None, ""): parts.append(f"Rec {r['record_high']}/{r['record_low']}")
     return "   ".join(parts)
 
-# ---- 1991-2020 threshold statistics (for milestones)
-def fetch_stats():
-    """Pull daily maxt/mint/snow for 1991-2020 and store, per threshold, the first/last date each year.
-    Keys: first_/last_ + freeze|hot90|hot80|snow_meas|snow_1in. Series are {year: iso date}; snow
-    series are keyed by season start year (seasons run Jul 1-Jun 30)."""
-    y0, y1 = NORMALS_YEARS
-    rows = _post({"sid": STATION, "sdate": f"{y0}-01-01", "edate": f"{y1}-12-31", "elems": ["maxt", "mint", "snow"]}, 180)["data"]
-    def num(v):
-        if v in ("M", "", None): return None
-        if v == "T": return 0.0
-        try: return float(v)
-        except ValueError: return None
-    D = [(dt.date.fromisoformat(r[0]), num(r[1]), num(r[2]), num(r[3])) for r in rows]
+# ---- threshold statistics (for milestones)
+# Averages use the 1991-2020 normals period. Earliest/latest dates use the whole available record, but only
+# in years with nearly complete data for the window that matters (missing days could hide an earlier event).
+MIN_COVERAGE = 0.95
+
+def _num(v):
+    if v in ("M", "", None): return None
+    if v == "T": return 0.0                        # trace counts as zero
+    v = v[:-1] if v.endswith("A") else v           # accumulated flag
+    try: return float(v)
+    except ValueError: return None
+
+def compute_series(D, lo, hi, require_coverage, extras=True):
+    """First/last threshold dates per year. D = [(date, maxt, mint, snow)] (None = missing).
+    Keys: first_/last_ + freeze|hot90|hot80|snow_meas|snow_1in -> {year: iso date}. Calendar-year series are
+    keyed by year; snow series by season start year (seasons run Jul 1-Jun 30). With require_coverage a
+    series year is kept only if the relevant window has >= MIN_COVERAGE non-missing days."""
+    have = {e: set() for e in ("maxt", "mint", "snow")}
+    for d, mx, mn, sn in D:
+        if mx is not None: have["maxt"].add(d)
+        if mn is not None: have["mint"].add(d)
+        if sn is not None: have["snow"].add(d)
+    def cov_ok(elem, start, end):
+        if not require_coverage: return True
+        n = (end - start).days + 1
+        return sum(1 for k in range(n) if start + dt.timedelta(days=k) in have[elem]) / n >= MIN_COVERAGE
     out = {}
-    def series(name, idx, test, season, part=None):
-        by = {}
-        for d, *v in D:
-            x = v[idx]
-            if x is None or not test(x): continue
-            if part == "spring" and d.month >= 7: continue
-            if part == "fall" and d.month < 7: continue
-            y = (d.year if d.month >= 7 else d.year - 1) if season == "snow" else d.year
-            by.setdefault(y, []).append(d)
-        if season == "snow": by = {y: v for y, v in by.items() if y0 <= y <= y1 - 1}   # full seasons only
-        return by
-    def put(key, by, fn): out[key] = {str(y): fn(v).isoformat() for y, v in by.items() if v}
-    put("last_freeze", series("f", 1, lambda x: x <= 32, "cal", "spring"), max)
-    put("first_freeze", series("f", 1, lambda x: x <= 32, "cal", "fall"), min)
-    for n, idx, test in (("hot90", 0, lambda x: x >= 90), ("hot80", 0, lambda x: x >= 80)):
-        by = series(n, idx, test, "cal"); put("first_" + n, by, min); put("last_" + n, by, max)
-    for n, thr in (("snow_meas", 0.1), ("snow_1in", 1.0)):
-        by = series(n, 2, lambda x, t=thr: x >= t, "snow"); put("first_" + n, by, min); put("last_" + n, by, max)
+    def put(key, year, d): out.setdefault(key, {})[str(year)] = d.isoformat()
+    by_year = {}
+    for d, mx, mn, sn in D: by_year.setdefault(d.year, []).append((d, mx, mn, sn))
+    for y in range(lo, hi + 1):
+        rows = by_year.get(y, [])
+        spr = [d for d, mx, mn, sn in rows if mn is not None and mn <= 32 and d.month < 7]
+        fal = [d for d, mx, mn, sn in rows if mn is not None and mn <= 32 and d.month >= 7]
+        if spr and cov_ok("mint", dt.date(y, 1, 1), dt.date(y, 6, 30)): put("last_freeze", y, max(spr))
+        if fal and cov_ok("mint", dt.date(y, 7, 1), dt.date(y, 12, 31)): put("first_freeze", y, min(fal))
+        if extras:
+            for name, thr in (("hot90", 90), ("hot80", 80)):
+                hot = [d for d, mx, mn, sn in rows if mx is not None and mx >= thr]
+                if hot: put("first_" + name, y, min(hot)); put("last_" + name, y, max(hot))
+    snow_all = [(d, sn) for d, mx, mn, sn in D if sn is not None]
+    for y in range(lo, hi + 1):                    # season y = Jul 1 y .. Jun 30 y+1
+        s0, s1 = dt.date(y, 7, 1), dt.date(y + 1, 6, 30)
+        for name, thr in (("snow_meas", 0.1), ("snow_1in", 1.0)):
+            days = [d for d, sn in snow_all if s0 <= d <= s1 and sn >= thr]
+            if not days: continue
+            if cov_ok("snow", dt.date(y, 10, 1), dt.date(y, 12, 31)): put("first_" + name, y, min(days))
+            if cov_ok("snow", dt.date(y + 1, 1, 1), dt.date(y + 1, 4, 30)): put("last_" + name, y, max(days))
+    return out
+
+def fetch_stats():
+    """Pull the daily record for CMHthr once; store 1991-2020 series (for averages) and whole-record series
+    (for earliest/latest) in the stats file."""
+    y0, y1 = NORMALS_YEARS
+    rows = _post({"sid": STATION, "sdate": "por", "edate": dt.date.today().isoformat(), "elems": ["maxt", "mint", "snow"]}, 300)["data"]
+    D = [(dt.date.fromisoformat(r[0]), _num(r[1]), _num(r[2]), _num(r[3])) for r in rows]
+    norm = [t for t in D if y0 <= t[0].year <= y1]
+    out = compute_series(norm, y0, y1, False)
+    for k in list(out):                            # snow seasons must lie fully inside the normals period
+        if "snow" in k: out[k] = {y: v for y, v in out[k].items() if y0 <= int(y) <= y1 - 1}
+    rec = compute_series(D, D[0][0].year, dt.date.today().year, True, extras=False)
+    out["record"] = rec
     out["_meta"] = {"station": STATION, "period": [y0, y1], "fetched": dt.date.today().isoformat(),
+                    "record_start": D[0][0].isoformat(), "record_end": D[-1][0].isoformat(),
                     "thresholds": {"freeze": "min temp <= 32F", "hot90": "max temp >= 90F", "hot80": "max temp >= 80F",
                                    "snow_meas": "snowfall >= 0.1 in", "snow_1in": "snowfall >= 1.0 in"},
-                    "note": "Averages are the mean date over 1991-2020. Snow seasons run Jul 1-Jun 30 (29 full seasons); trace counts as 0; missing days ignored."}
+                    "note": "Averages are mean dates over 1991-2020 (snow: 29 full seasons Jul 1-Jun 30). Earliest/latest use the full record, "
+                            "only in years with >=95% data coverage of the relevant window. Trace counts as 0; missing days ignored."}
     store.write(STATS_FILE, json.dumps(out, indent=1))
     return out
 
@@ -97,18 +129,28 @@ def _ref(key, y, d):
     """Reference date for offsets: Jul 1 of the season year for snow, Jan 1 of the year otherwise."""
     return dt.date(y, 7, 1) if "snow" in key else dt.date(d.year, 1, 1)
 
+def _offsets(key, series):
+    out = []
+    for y, iso in series.items():
+        d = dt.date.fromisoformat(iso); out.append(((d - _ref(key, int(y), d)).days, d))
+    return out
+
+def place(key, target_year, offset):
+    """Calendar date in `target_year` that sits `offset` days after the series' reference date."""
+    if "snow" in key:      # offsets run from Jul 1; try the season starting last year and this year
+        for base in (target_year, target_year - 1):
+            d = dt.date(base, 7, 1) + dt.timedelta(days=offset)
+            if d.year == target_year: return d
+    return dt.date(target_year, 1, 1) + dt.timedelta(days=offset)
+
 def summary(key, target_year, st=None):
-    """(mean_date, earliest, latest) for a series, mapped into `target_year`. Each of earliest/latest is
-    (date_in_target_year, actual_year_it_happened). None if no data."""
+    """(mean_date, earliest, latest) mapped into `target_year`. mean: average over 1991-2020. earliest/latest:
+    (date_in_target_year, year_it_happened, record_start_year, record_end_year) over the whole record.
+    None if no data."""
     st = st or stats(); series = st.get(key)
     if not series: return None
-    snow = "snow" in key
-    offs = []
-    for y, iso in series.items():
-        d = dt.date.fromisoformat(iso); offs.append(((d - _ref(key, int(y), d)).days, d))
-    def place(o):
-        base = dt.date(target_year - (1 if (snow and key.startswith("last_")) else 0), 7 if snow else 1, 1)
-        return base + dt.timedelta(days=o)
-    mean = place(round(statistics.mean(o for o, _ in offs)))
+    mean = place(key, target_year, round(statistics.mean(o for o, _ in _offsets(key, series))))
+    rec = st.get("record", {}).get(key) or series
+    offs = _offsets(key, rec); years = sorted(int(y) for y in rec)
     lo, hi = min(offs, key=lambda t: t[0]), max(offs, key=lambda t: t[0])
-    return mean, (place(lo[0]), lo[1].year), (place(hi[0]), hi[1].year)
+    return mean, (place(key, target_year, lo[0]), lo[1].year, years[0], years[-1]), (place(key, target_year, hi[0]), hi[1].year, years[0], years[-1])

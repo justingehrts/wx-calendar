@@ -83,10 +83,10 @@ def climo_milestones(year):
         if mean.year == year: out.append((f"climo:{key}:avg:{year}", label, mean, CLIMO, why))
         if extremes:
             what = label.replace("Avg ", "")
-            for tag, (d, y) in (("earliest", early), ("latest", late)):
+            for tag, (d, y, r0, r1) in (("earliest", early), ("latest", late)):
                 if d.year == year:
-                    out.append((f"climo:{key}:{tag}:{year}", f"{tag.capitalize()} {what} ({y})", d, CLIMO,
-                                f"{tag.capitalize()} date in {per[0]}-{per[1]} (it happened in {y}); shown on this calendar date."))
+                    out.append((f"climo:{key}:rec_{tag}:{year}", f"{tag.capitalize()} {what} on record ({y})", d, CLIMO,
+                                f"{tag.capitalize()} on record ({r0}-{r1}, years with near-complete data); it happened in {y}, shown on this calendar date."))
     return out
 
 def propose(year):

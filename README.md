@@ -61,7 +61,7 @@ This path is also untested (no Docker daemon in the authoring environment).
   with the same definition is used (it agreed with USNO to within 0.52 minute on every day of 2026) and the app says so.
 - **Moon phases and seasons**: PyEphem, converted to Eastern before taking the date.
 - **Normals (1991-2020) and daily records**: RCC-ACIS, **threaded** station `CMHthr` ("Columbus Area", the long-term record NWS uses; plain `CMH` is the airport alone and has a shorter record, so its daily records differ). Stored by month-day in `reference/climo_CMHthr_md.csv`.
-- **Climo milestones**: computed from CMHthr daily data for 1991-2020 (`reference/climo_CMHthr_stats.json`): mean date of last/first
+- **Climo milestones**: computed from CMHthr daily data (`reference/climo_CMHthr_stats_v2.json`). Averages are mean dates over 1991-2020; earliest/latest use the whole record (1878 on), counting only years with at least 95% data coverage of the relevant window. Thresholds: last/first
   32° freeze (min temp), first/last 80° and 90° day (max temp), first/last measurable (≥0.1") and ≥1" snowfall (seasons Jul 1-Jun 30).
 - **Meteor showers**: `reference/meteor_showers.json` has *typical* peak dates. Add verified dates for a year under `"years"`
   (from the IMO or AMS calendar); until then the proposals say "typical date, not verified".

@@ -257,3 +257,34 @@ def test_climate_data_uses_threaded_columbus_record():
     r = climo.day(D(2026, 7, 14)); assert (r["record_high"], r["record_high_year"]) == ("106", "1936")   # airport-only record is 104 (1954)
     r = climo.day(D(2026, 10, 31)); assert (r["record_low"], r["record_low_year"]) == ("20", "1887")      # airport-only record is 25 (1988)
     assert len(climo.table()) == 366 and climo.day(D(2024, 2, 29))["record_high"]
+
+
+def test_climo_extremes_use_full_record_but_averages_use_1991_2020():
+    from calendar_core import climo
+    st = climo.stats(); assert "record" in st and st["_meta"]["record_start"] < "1890"
+    m, early, late = climo.summary("first_snow_1in", 2026, st)
+    assert (early[0], early[1]) == (D(2026, 10, 22), 1925)                    # earliest 1" snow on record
+    rec = {k: v for k, v in st["record"]["first_snow_1in"].items()}; assert rec["1962"] == "1962-10-25"   # Oct 25, 1962 is in the record
+    assert D(2026, 11, 25) < m < D(2026, 12, 25) and early[2] < 1900           # average still the 1991-2020 mean (~Dec 10)
+    assert len(st["first_snow_1in"]) == 29 and len(st["record"]["first_snow_1in"]) > 100
+    assert climo.summary("first_snow_meas", 2026, st)[1][0] == D(2026, 10, 10)      # Oct 10, 1906 (0.1 in)
+
+def test_missing_data_years_are_excluded_from_record_extremes():
+    from calendar_core import climo
+    # season 1900: snow >=1in on Dec 20, but October-December snow data is mostly missing -> cannot say "first"
+    D1 = [(D(1900, 10, 1) + dt.timedelta(days=i), 50, 40, None) for i in range(92)]
+    D1 = [(d, mx, mn, 1.5 if d == D(1900, 12, 20) else None) for d, mx, mn, _ in D1]
+    assert "first_snow_1in" not in climo.compute_series(D1, 1900, 1900, True, extras=False)
+    full = [(d, mx, mn, 1.5 if d == D(1900, 12, 20) else 0.0) for d, mx, mn, _ in D1]
+    assert climo.compute_series(full, 1900, 1900, True, extras=False)["first_snow_1in"] == {"1900": "1900-12-20"}
+
+def test_old_climo_extremes_can_be_retired_and_reproposed(con):
+    cands = {m["key"]: m for m in milestones.propose(2026)}
+    assert "climo:first_snow_1in:rec_earliest:2026" in cands and "climo:first_snow_1in:earliest:2026" not in cands
+    assert "on record (1925)" in cands["climo:first_snow_1in:rec_earliest:2026"]["title"]
+    i = db.add_event(con, "Earliest first 1\" snow (1993)", "2026-10-30")
+    db.decide_milestone(con, "climo:first_snow_1in:earliest:2026", "accepted", i)       # an entry from the old definition
+    db.decide_milestone(con, "climo:first_snow_1in:avg:2026", "accepted", db.add_event(con, "Avg first 1\" snow", "2026-12-10"))
+    assert [e["id"] for _, e in db.outdated_climo_milestones(con)] == [i]
+    assert db.retire_outdated_climo_milestones(con) == 1
+    assert [e["title"] for e in db.events(con)] == ["Avg first 1\" snow"] and len(db.events(con, only_deleted=True)) == 1
