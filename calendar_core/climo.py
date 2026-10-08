@@ -1,11 +1,13 @@
-"""CMH (Columbus) climate data from RCC-ACIS: daily normals (1991-2020) and period-of-record
+"""Columbus Area (threaded record CMHthr) climate data from RCC-ACIS: daily normals (1991-2020) and period-of-record
 daily records, keyed by MM-DD so they work for any year; plus 1991-2020 threshold statistics
 used for milestone proposals."""
 import csv, datetime as dt, io, json, statistics, urllib.request
 from functools import lru_cache
 from . import store
 
-STATION = "CMH"
+STATION = "CMHthr"   # "Columbus Area" threaded record (what NWS climate pages use); plain "CMH" is the airport alone
+MD_FILE = f"climo_{STATION}_md.csv"
+STATS_FILE = f"climo_{STATION}_stats.json"
 ACIS = "https://data.rcc-acis.org/StnData"
 NORMALS_YEARS = (1991, 2020)
 
@@ -29,12 +31,12 @@ def fetch_normals_records():
     for date, h, l in normals:
         md = date[5:]; rh, rl = hi.get(md, ("", "")), lo.get(md, ("", ""))
         w.writerow([md, round(float(h)), round(float(l)), rh[0], rh[1], rl[0], rl[1]])
-    store.write("climo_md.csv", buf.getvalue())
+    store.write(MD_FILE, buf.getvalue())
     return len(normals)
 
 _tbl = {}
 def table():
-    text = store.load_text("climo_md.csv")
+    text = store.load_text(MD_FILE)
     if _tbl.get("src") is not text: _tbl.update(src=text, rows={r["md"]: r for r in csv.DictReader(io.StringIO(text))} if text else {})
     return _tbl["rows"]
 
@@ -86,10 +88,10 @@ def fetch_stats():
                     "thresholds": {"freeze": "min temp <= 32F", "hot90": "max temp >= 90F", "hot80": "max temp >= 80F",
                                    "snow_meas": "snowfall >= 0.1 in", "snow_1in": "snowfall >= 1.0 in"},
                     "note": "Averages are the mean date over 1991-2020. Snow seasons run Jul 1-Jun 30 (29 full seasons); trace counts as 0; missing days ignored."}
-    store.write("climo_stats.json", json.dumps(out, indent=1))
+    store.write(STATS_FILE, json.dumps(out, indent=1))
     return out
 
-def stats(): return store.load_json("climo_stats.json") or {}
+def stats(): return store.load_json(STATS_FILE) or {}
 
 def _ref(key, y, d):
     """Reference date for offsets: Jul 1 of the season year for snow, Jan 1 of the year otherwise."""

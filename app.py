@@ -4,7 +4,7 @@ import streamlit as st
 from calendar_core import astro, climo, db, ical, importers, milestones, patterns, preview, recurrence, render_pdf as R
 
 st.set_page_config(page_title="Weathercast Planning Calendar", layout="wide")
-APP_VERSION = "2026-10-08b"
+APP_VERSION = "2026-10-08c"
 
 # Hosted database settings may come from Streamlit secrets; the storage layer reads the environment.
 for _k in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
@@ -76,7 +76,7 @@ with st.sidebar:
     if src != "usno":
         st.warning("Sunrise/sunset: using built-in calculation" + (" (USNO data incomplete)" if src == "partial" else f" (no USNO data loaded for {year}; see Settings)"))
     st.caption(f"App version {APP_VERSION}  |  storage: {'hosted database' if db.turso_config() else 'local file'}")
-    st.caption(f"Sun and moon: U.S. Naval Observatory{'' if src == 'usno' else ' / PyEphem'}; normals (1991-2020) and records: RCC-ACIS, Columbus (CMH).")
+    st.caption(f"Sun and moon: U.S. Naval Observatory{'' if src == 'usno' else ' / PyEphem'}; normals (1991-2020) and records: RCC-ACIS, Columbus Area (threaded record, CMHthr).")
 
 tab_events, tab_cats, tab_ms, tab_hist, tab_set = st.tabs(["Events", "Categories", "Milestones", "History & trash", "Settings"])
 
@@ -236,7 +236,7 @@ with tab_cats:
 # ---------------------------------------------------------------- milestones
 with tab_ms:
     st.caption(f"Proposed entries for {year}: sun, sky, DST and climate milestones. Accept to add to the calendar; rejected ones do not come back. "
-               "Climo dates are mean dates over 1991-2020 at Columbus (CMH): last/first 32° freeze (min temp), 80°/90° days (max temp), measurable (≥0.1\") and ≥1\" snowfall.")
+               "Climo dates are mean dates over 1991-2020 at Columbus Area (CMHthr): last/first 32° freeze (min temp), 80°/90° days (max temp), measurable (≥0.1\") and ≥1\" snowfall.")
     pend = milestones.pending(con, year)
     if not pend: st.success("Nothing pending for this year.")
     else:

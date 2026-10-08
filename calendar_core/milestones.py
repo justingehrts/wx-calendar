@@ -75,7 +75,7 @@ CLIMO_ITEMS = [   # (series key, label, include earliest/latest extremes)
 def climo_milestones(year):
     st = climo.stats(); out = []
     if not st: return out
-    per = st["_meta"]["period"]; why = f"Mean date over {per[0]}-{per[1]}, Columbus (CMH)."
+    per = st["_meta"]["period"]; why = f"Mean date over {per[0]}-{per[1]}, Columbus Area (threaded record, CMHthr)."
     for key, label, extremes in CLIMO_ITEMS:
         s = climo.summary(key, year, st)
         if not s: continue

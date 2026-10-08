@@ -4,7 +4,7 @@ A Streamlit app where the weather team keeps one shared list of events and print
 planning calendar (US Letter or A4 landscape, color or black-and-white laser). It replaces
 `Content_Idea_Calendar.xlsx`. The full spec is in `BUILD_PLAN.md`.
 
-Location for all sun, moon and climate data: Columbus, OH (39.9612 N, 82.9988 W; climate station CMH). All times Eastern.
+Location for all sun, moon and climate data: Columbus, OH (39.9612 N, 82.9988 W; climate record: Columbus Area, ACIS threaded station CMHthr). All times Eastern.
 
 ## What it does
 - **Events**: editable table, live month preview, overflow warnings, details panel (time, location, notes, link),
@@ -60,8 +60,8 @@ This path is also untested (no Docker daemon in the authoring environment).
   2026 is bundled in `reference/`. For other years use Settings > fetch (about 2 minutes). Until then, a PyEphem calculation
   with the same definition is used (it agreed with USNO to within 0.52 minute on every day of 2026) and the app says so.
 - **Moon phases and seasons**: PyEphem, converted to Eastern before taking the date.
-- **Normals (1991-2020) and daily records**: RCC-ACIS, station CMH. Stored by month-day in `reference/climo_md.csv`.
-- **Climo milestones**: computed from CMH daily data for 1991-2020 (`reference/climo_stats.json`): mean date of last/first
+- **Normals (1991-2020) and daily records**: RCC-ACIS, **threaded** station `CMHthr` ("Columbus Area", the long-term record NWS uses; plain `CMH` is the airport alone and has a shorter record, so its daily records differ). Stored by month-day in `reference/climo_CMHthr_md.csv`.
+- **Climo milestones**: computed from CMHthr daily data for 1991-2020 (`reference/climo_CMHthr_stats.json`): mean date of last/first
   32° freeze (min temp), first/last 80° and 90° day (max temp), first/last measurable (≥0.1") and ≥1" snowfall (seasons Jul 1-Jun 30).
 - **Meteor showers**: `reference/meteor_showers.json` has *typical* peak dates. Add verified dates for a year under `"years"`
   (from the IMO or AMS calendar); until then the proposals say "typical date, not verified".

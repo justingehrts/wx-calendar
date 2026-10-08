@@ -248,3 +248,12 @@ def test_moon_icons_only_on_principal_phases(con):
     finally: R.moon_icon = orig
     expected = sum(1 for wk in cal.Calendar(6).monthdatescalendar(2026, 10) for d in wk if astro.principal(d))
     assert len(drawn) == expected and 4 <= expected <= 6
+
+
+def test_climate_data_uses_threaded_columbus_record():
+    from calendar_core import climo
+    assert climo.STATION == "CMHthr" and "CMHthr" in climo.MD_FILE and "CMHthr" in climo.STATS_FILE
+    assert climo.stats()["_meta"]["station"] == "CMHthr"
+    r = climo.day(D(2026, 7, 14)); assert (r["record_high"], r["record_high_year"]) == ("106", "1936")   # airport-only record is 104 (1954)
+    r = climo.day(D(2026, 10, 31)); assert (r["record_low"], r["record_low_year"]) == ("20", "1887")      # airport-only record is 25 (1988)
+    assert len(climo.table()) == 366 and climo.day(D(2024, 2, 29))["record_high"]

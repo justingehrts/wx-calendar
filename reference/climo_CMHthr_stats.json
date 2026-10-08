@@ -316,12 +316,12 @@
   "2019": "2020-02-12"
  },
  "_meta": {
-  "station": "CMH",
+  "station": "CMHthr",
   "period": [
    1991,
    2020
   ],
-  "fetched": "2026-10-04",
+  "fetched": "2026-10-08",
   "thresholds": {
    "freeze": "min temp <= 32F",
    "hot90": "max temp >= 90F",
