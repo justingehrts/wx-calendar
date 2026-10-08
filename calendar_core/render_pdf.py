@@ -156,12 +156,11 @@ def month_page(c, year, month, items, cats, opts, report):
             c.setStrokeColor(HexColor("#999999" if opts.bw else "#B8BDC6")); c.setLineWidth(.6); c.rect(x, ybot, cw, rh, fill=1, stroke=1)
             c.setFillColor(HexColor(NAVY) if inm else HexColor("#777777" if opts.bw else "#9AA0AA"))
             c.setFont("Helvetica-Bold", 13 if inm else 10); c.drawString(x + 4, ytop - 14, str(d.day))
-            if opts.moon:
+            lab = astro.principal(d) if opts.moon else None
+            if lab:      # principal phases only (new, 1st quarter, full, last quarter), drawn with the actual phase angle
                 moon_icon(c, x + cw - 9, ytop - 10, 5.2, astro.moon_phase28(d), opts.bw)
-                lab = astro.principal(d)
-                if lab:
-                    c.setFont("Helvetica-Bold", 5.3); c.setFillColor(HexColor("#222222" if opts.bw else "#6B3FA0"))
-                    c.drawRightString(x + cw - 17, ytop - 11.5, lab.upper())
+                c.setFont("Helvetica-Bold", 5.3); c.setFillColor(HexColor("#222222" if opts.bw else "#6B3FA0"))
+                c.drawRightString(x + cw - 17, ytop - 11.5, lab.upper())
             liney = ybot + 3
             if sun_on and inm:
                 rise, sset, _ = astro.sun_times(d); parts = []

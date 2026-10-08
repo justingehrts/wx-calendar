@@ -4,7 +4,7 @@ import streamlit as st
 from calendar_core import astro, climo, db, ical, importers, milestones, patterns, preview, recurrence, render_pdf as R
 
 st.set_page_config(page_title="Weathercast Planning Calendar", layout="wide")
-APP_VERSION = "2026-10-08a"
+APP_VERSION = "2026-10-08b"
 
 # Hosted database settings may come from Streamlit secrets; the storage layer reads the environment.
 for _k in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
@@ -49,7 +49,7 @@ with st.sidebar:
     st.caption("Location: Columbus, OH (39.9612 N, 82.9988 W). Times are Eastern.")
     st.subheader("Show on each day")
     o_sun = st.checkbox("Sunrise / sunset", True); o_day = st.checkbox("Daylight length and change", True)
-    o_moon = st.checkbox("Moon phase", True); o_nrm = st.checkbox("Normal high/low", True)
+    o_moon = st.checkbox("Moon phases (new, quarters, full)", True); o_nrm = st.checkbox("Normal high/low", True)
     o_rec = st.checkbox("Record high/low", True); o_notes = st.checkbox("Notes boxes at bottom", True)
     o_det = st.checkbox("Details page (second page)", True)
     st.subheader("Page")

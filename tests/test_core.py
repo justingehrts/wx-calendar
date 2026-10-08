@@ -235,3 +235,16 @@ def test_short_rows_are_padded_not_crashing():
 def test_diagnose_reports(con):
     db.add_event(con, "A", "2026-01-01"); txt = db.diagnose(con)
     assert "history rows" in txt and "lengths [7]" in txt
+
+
+def test_moon_icons_only_on_principal_phases(con):
+    """Each month page draws one moon icon per principal phase it shows, not one per day."""
+    import calendar as cal
+    drawn = []
+    orig = R.moon_icon
+    R.moon_icon = lambda *a, **k: drawn.append(1)
+    try:
+        R.render([], db.categories(con), 2026, [10], R.Options(details_page=False))
+    finally: R.moon_icon = orig
+    expected = sum(1 for wk in cal.Calendar(6).monthdatescalendar(2026, 10) for d in wk if astro.principal(d))
+    assert len(drawn) == expected and 4 <= expected <= 6
