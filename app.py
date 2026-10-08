@@ -4,6 +4,7 @@ import streamlit as st
 from calendar_core import astro, climo, db, ical, importers, milestones, patterns, preview, recurrence, render_pdf as R
 
 st.set_page_config(page_title="Weathercast Planning Calendar", layout="wide")
+APP_VERSION = "2026-10-08a"
 
 # Hosted database settings may come from Streamlit secrets; the storage layer reads the environment.
 for _k in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
@@ -74,6 +75,7 @@ with st.sidebar:
     src = astro.data_source(year)
     if src != "usno":
         st.warning("Sunrise/sunset: using built-in calculation" + (" (USNO data incomplete)" if src == "partial" else f" (no USNO data loaded for {year}; see Settings)"))
+    st.caption(f"App version {APP_VERSION}  |  storage: {'hosted database' if db.turso_config() else 'local file'}")
     st.caption(f"Sun and moon: U.S. Naval Observatory{'' if src == 'usno' else ' / PyEphem'}; normals (1991-2020) and records: RCC-ACIS, Columbus (CMH).")
 
 tab_events, tab_cats, tab_ms, tab_hist, tab_set = st.tabs(["Events", "Categories", "Milestones", "History & trash", "Settings"])
@@ -258,22 +260,28 @@ with tab_ms:
 
 # ---------------------------------------------------------- history & trash
 with tab_hist:
-    h1, h2 = st.columns(2)
-    with h1:
-        st.subheader("Recent changes")
-        if st.button("Undo last change", key="undo2"):
-            m = db.undo_last(con); snapshot(); st.session_state["msg"] = ("info", m or "Nothing to undo"); st.rerun()
-        hist = db.history(con, 100)
-        st.dataframe(pd.DataFrame([{"when": h["at"].replace("T", " "), "action": h["action"] + (" (undone)" if h["undone"] else ""), "event": h["title"]} for h in hist],
-                                  columns=["when", "action", "event"]), hide_index=True, width="stretch")
-    with h2:
-        st.subheader("Trash")
-        trash = db.events(con, only_deleted=True)
-        if not trash: st.caption("Trash is empty.")
-        for e in trash:
-            a, b = st.columns([4, 1])
-            a.write(f"{e['start_date']}  {e['title']}  _(deleted {e['deleted_at'][:16].replace('T', ' ')})_")
-            if b.button("Restore", key=f"rs{e['id']}"): db.restore_event(con, e["id"]); snapshot(); st.rerun()
+    try:
+        h1, h2 = st.columns(2)
+        with h1:
+            st.subheader("Recent changes")
+            if st.button("Undo last change", key="undo2"):
+                m = db.undo_last(con); snapshot(); st.session_state["msg"] = ("info", m or "Nothing to undo"); st.rerun()
+            hist = db.history(con, 100)
+            st.dataframe(pd.DataFrame([{"when": str(h.get("at") or "").replace("T", " "), "action": str(h.get("action") or "?") + (" (undone)" if h.get("undone") else ""), "event": h.get("title")} for h in hist],
+                                      columns=["when", "action", "event"]), hide_index=True, width="stretch")
+        with h2:
+            st.subheader("Trash")
+            trash = db.events(con, only_deleted=True)
+            if not trash: st.caption("Trash is empty.")
+            for e in trash:
+                a_, b_ = st.columns([4, 1])
+                a_.write(f"{e['start_date']}  {e['title']}  _(deleted {str(e['deleted_at'])[:16].replace('T', ' ')})_")
+                if b_.button("Restore", key=f"rs{e['id']}"): db.restore_event(con, e["id"]); snapshot(); st.rerun()
+    except Exception as ex:      # never let this tab take down the whole page
+        if type(ex).__name__ in ("RerunException", "StopException"): raise
+        st.error(f"The history view failed ({type(ex).__name__}: {ex}). The rest of the app still works. "
+                 "Please send the details below to whoever maintains this app.")
+        st.code(db.diagnose(con))
 
 # ------------------------------------------------------------------ settings
 with tab_set:

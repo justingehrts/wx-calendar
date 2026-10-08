@@ -223,3 +223,15 @@ def test_nothing_depends_on_driver_column_names_or_lastrowid(tmp_path):
     db.set_setting(con, "k", {"a": 1}); assert db.get_setting(con, "k") == {"a": 1}
     db.decide_milestone(con, "m1", "rejected"); assert db.milestone_status(con) == {"m1": "rejected"}
     assert db.backup_bytes(con)[:15] == b"SQLite format 3"
+
+
+def test_short_rows_are_padded_not_crashing():
+    class Cur:
+        def fetchall_tuples(self): return [(1, 2, 3)]
+    class FakeCon:
+        def execute(self, sql, params=()): return Cur()
+    assert db._named(FakeCon(), "", (), ["a", "b", "c", "d"]) == [{"a": 1, "b": 2, "c": 3, "d": None}]
+
+def test_diagnose_reports(con):
+    db.add_event(con, "A", "2026-01-01"); txt = db.diagnose(con)
+    assert "history rows" in txt and "lengths [7]" in txt

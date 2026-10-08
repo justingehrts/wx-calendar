@@ -172,7 +172,7 @@ def _named(con, sql, params, cols):
     names (hosted libsql connections have returned unexpected names for wildcard selects)."""
     cur = con.execute(sql, params)
     raw = cur.fetchall_tuples() if hasattr(cur, "fetchall_tuples") else [tuple(r) for r in cur.fetchall()]
-    return [dict(zip(cols, t)) for t in raw]
+    return [dict(zip(cols, tuple(t) + (None,) * (len(cols) - len(t)))) for t in raw]
 
 def _row(d):
     d = dict(d); pj, kind = d.pop("params_json"), d.pop("kind")
@@ -340,3 +340,23 @@ def backup_bytes(con):
                 if rows: dst.executemany(f'INSERT INTO "{name}"({",".join(cols)}) VALUES({",".join("?" * len(cols))})', rows)
             dst.commit()
         dst.close(); return open(p, "rb").read()
+
+
+def diagnose(con):
+    """Plain-text report about what the driver returns for the history query (for troubleshooting hosted setups)."""
+    import importlib.metadata as md
+    out = []
+    try: out.append(f"libsql {md.version('libsql')}")
+    except Exception: out.append("libsql not installed")
+    out.append("backend: " + ("hosted (Turso)" if turso_config() else "local file") + f"; connection type: {type(con).__name__}")
+    cols = ", ".join(HISTORY_COLS)
+    for label, sql, params in (("history rows (3 newest), positional", f"SELECT {cols} FROM history ORDER BY id DESC LIMIT 3", ()),
+                               ("same with bound LIMIT", f"SELECT {cols} FROM history ORDER BY id DESC LIMIT ?", (3,)),
+                               ("table_info(history)", "PRAGMA table_info(history)", ()),
+                               ("counts", "SELECT (SELECT COUNT(*) FROM history), (SELECT COUNT(*) FROM events), (SELECT COUNT(*) FROM categories)", ())):
+        try:
+            rows = _tuples(con, sql, params)
+            out.append(f"{label}: {len(rows)} row(s), lengths {[len(r) for r in rows]}")
+            for r in rows[:3]: out.append("   " + repr(r)[:300])
+        except Exception as ex: out.append(f"{label}: ERROR {type(ex).__name__}: {ex}")
+    return "\n".join(out)
