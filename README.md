@@ -64,7 +64,13 @@ This path is also untested (no Docker daemon in the authoring environment).
   by 1 minute on about half the days. Nothing is downloaded: it works for any year. Day length and its daily change come from PyEphem
   (matches timeanddate.com to about a second).
 - **Moon phases, seasons and DST**: PyEphem, converted to Eastern before taking the date.
-- **Normals (1991-2020) and daily records**: RCC-ACIS, **threaded** station `CMHthr` ("Columbus Area", the long-term record NWS uses; plain `CMH` is the airport alone and has a shorter record, so its daily records differ). Stored by month-day in `reference/climo_CMHthr_md.csv`.
+- **Normals (1991-2020)**: the NCEI daily normals in tenths of a degree (republished by the Iowa Environmental Mesonet), rounded **half-up**
+  like the NWS does (46.5 becomes 47). ACIS returns whole degrees rounded half-to-even (46.5 becomes 46), which disagreed with the NWS on about 6% of
+  days. Verified: 100% of normals match 488 NWS climate-report values from 2026.
+- **Daily records**: computed from the whole daily record of the **threaded** Columbus Area station `CMHthr` (RCC-ACIS; plain `CMH` is the airport
+  alone, whose records differ), with every tied year kept. Record values match the NWS on all days checked; a few tied-year lists differ
+  (ours sometimes has one extra early year). Stored by month-day in `reference/climo_CMHthr_md_v2.csv`; records set after that file was made
+  appear after Settings > Refresh.
 - **Climo milestones**: computed from CMHthr daily data (`reference/climo_CMHthr_stats_v2.json`). Averages are mean dates over 1991-2020; earliest/latest use the whole record (1878 on), counting only years with at least 95% data coverage of the relevant window. Thresholds: last/first
   32° freeze (min temp), first/last 80° and 90° day (max temp), first/last measurable (≥0.1") and ≥1" snowfall (seasons Jul 1-Jun 30).
 - **Meteor showers**: `reference/meteor_showers.json` has *typical* peak dates. Add verified dates for a year under `"years"`

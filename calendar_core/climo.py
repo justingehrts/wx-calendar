@@ -1,12 +1,12 @@
 """Columbus Area (threaded record CMHthr) climate data from RCC-ACIS: daily normals (1991-2020) and period-of-record
 daily records, keyed by MM-DD so they work for any year; plus 1991-2020 threshold statistics
 used for milestone proposals."""
-import csv, datetime as dt, io, json, statistics, urllib.request
+import csv, datetime as dt, decimal, io, json, statistics, urllib.request
 from functools import lru_cache
 from . import store
 
 STATION = "CMHthr"   # "Columbus Area" threaded record (what NWS climate pages use); plain "CMH" is the airport alone
-MD_FILE = f"climo_{STATION}_md.csv"
+MD_FILE = f"climo_{STATION}_md_v2.csv"   # v2: normals from NCEI tenths (rounded half-up like the NWS), records with all tied years
 STATS_FILE = f"climo_{STATION}_stats_v2.json"   # v2: adds whole-record extremes; old cached copies are ignored
 ACIS = "https://data.rcc-acis.org/StnData"
 NORMALS_YEARS = (1991, 2020)
@@ -16,21 +16,47 @@ def _post(body, timeout=90):
     return json.load(urllib.request.urlopen(r, timeout=timeout))
 
 # ---- normals and records, by MM-DD
+IEM_DAILY = "https://mesonet.agron.iastate.edu/cgi-bin/request/daily.py?network=OH_ASOS&stations=CMH&sts=2024-01-01&ets=2024-12-31&format=json"
+
+def half_up(x):
+    """Round like the NWS does (46.5 -> 47). Python's round() and ACIS round halves to even (46.5 -> 46)."""
+    return int(decimal.Decimal(str(x)).quantize(decimal.Decimal(1), rounding=decimal.ROUND_HALF_UP))
+
+def _iem_normals():
+    """{MM-DD: (normal_high_F, normal_low_F)} in tenths: the NCEI 1991-2020 daily normals for the airport, republished
+    by the Iowa Environmental Mesonet. (ACIS only returns whole degrees; its normals match CMHthr's.)"""
+    rows = json.load(urllib.request.urlopen(IEM_DAILY, timeout=90))
+    out = {r["day"][5:10]: (r["climo_high_f"], r["climo_low_f"]) for r in rows if r.get("climo_high_f") is not None}
+    if len(out) < 366: raise ValueError(f"IEM returned normals for only {len(out)} days")
+    return out
+
+def _daily_records(rows):
+    """{MM-DD: {hi: (value, [years]), lo: (value, [years])}} from the whole daily record (all tied years kept)."""
+    rec = {}
+    for r in rows:
+        md = r[0][5:]; y = int(r[0][:4]); mx, mn = _num(r[1]), _num(r[2])
+        e = rec.setdefault(md, {"hi": [None, []], "lo": [None, []]})
+        if mx is not None:
+            if e["hi"][0] is None or mx > e["hi"][0]: e["hi"] = [mx, [y]]
+            elif mx == e["hi"][0]: e["hi"][1].append(y)
+        if mn is not None:
+            if e["lo"][0] is None or mn < e["lo"][0]: e["lo"] = [mn, [y]]
+            elif mn == e["lo"][0]: e["lo"][1].append(y)
+    return rec
+
 def fetch_normals_records():
-    """Normals for leap year 2024 (so Feb 29 exists) plus por daily records. Writes cache CSV."""
-    normals = _post({"sid": STATION, "sdate": "2024-01-01", "edate": "2024-12-31",
-                     "elems": [{"name": "maxt", "normal": "1"}, {"name": "mint", "normal": "1"}]})["data"]
-    def por(elem, reduce):
-        q = {"sid": STATION, "sdate": "por", "edate": "por", "elems": [{
-            "name": elem, "interval": "dly", "duration": "dly",
-            "smry": {"reduce": reduce, "add": "date"}, "smry_only": 1, "groupby": "year"}]}
-        return {d[5:]: (v, d[:4]) for v, d in _post(q)["smry"][0]}
-    hi, lo = por("maxt", "max"), por("mint", "min")
+    """Normals (NCEI tenths via IEM, rounded half-up) and daily records with all tied years (ACIS CMHthr daily
+    record). Writes the cache file."""
+    normals = _iem_normals()
+    rows = _post({"sid": STATION, "sdate": "por", "edate": dt.date.today().isoformat(), "elems": ["maxt", "mint"]}, 300)["data"]
+    rec = _daily_records(rows)
     buf = io.StringIO(); w = csv.writer(buf, lineterminator="\n")
-    w.writerow(["md", "normal_high", "normal_low", "record_high", "record_high_year", "record_low", "record_low_year"])
-    for date, h, l in normals:
-        md = date[5:]; rh, rl = hi.get(md, ("", "")), lo.get(md, ("", ""))
-        w.writerow([md, round(float(h)), round(float(l)), rh[0], rh[1], rl[0], rl[1]])
+    w.writerow(["md", "normal_high", "normal_low", "normal_high_f", "normal_low_f", "record_high", "record_high_year", "record_high_years",
+                "record_low", "record_low_year", "record_low_years"])
+    for md in sorted(normals):
+        h, l = normals[md]; e = rec[md]
+        w.writerow([md, half_up(h), half_up(l), h, l, int(e["hi"][0]), min(e["hi"][1]), ";".join(map(str, sorted(e["hi"][1]))),
+                    int(e["lo"][0]), min(e["lo"][1]), ";".join(map(str, sorted(e["lo"][1])))])
     store.write(MD_FILE, buf.getvalue())
     return len(normals)
 

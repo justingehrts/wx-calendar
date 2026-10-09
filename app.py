@@ -4,7 +4,7 @@ import streamlit as st
 from calendar_core import astro, climo, db, ical, importers, milestones, patterns, preview, recurrence, render_pdf as R
 
 st.set_page_config(page_title="Weathercast Planning Calendar", layout="wide")
-APP_VERSION = "2026-10-10a"
+APP_VERSION = "2026-10-10b"
 
 # Hosted database settings may come from Streamlit secrets; the storage layer reads the environment.
 for _k in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):

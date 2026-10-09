@@ -332,3 +332,23 @@ def test_matches_nws_climate_reports_for_columbus():
     assert len(nws) > 150 and len(miss) <= 6, miss                       # 339 of 342 match today
     for k, name, tm, want in miss:                                       # a miss is only allowed within 2 s of a minute boundary
         sec = int(tm[-2:]); assert sec <= 2 or sec >= 58, (k, name, tm, want)
+
+
+def test_normals_and_records_match_nws_climate_reports():
+    """Normals round half-up like the NWS (ACIS rounds half to even: Mar 5 high 46.5 -> 47, not 46); records match the NWS."""
+    from calendar_core import climo
+    fx = _fixture("nws_climo_2026.json"); bad = []; n = 0
+    for block in ("today", "day"):
+        for k, r in fx[block].items():
+            c = climo.day(D.fromisoformat(k)); n += 1
+            got = (int(c["normal_high"]), int(c["normal_low"]), int(c["record_high"]), int(c["record_low"]))
+            want = (r["norm_hi"], r["norm_lo"], r["rec_hi"], r["rec_lo"])
+            if got[:2] != want[:2]: bad.append(("normal", k, got, want))
+            if got[2:] != want[2:] and k != "2026-03-22": bad.append(("record", k, got, want))     # Mar 22: a record set after the report
+    assert n > 450 and not bad, bad[:5]
+    assert (climo.day(D(2026, 3, 5))["normal_high"], climo.day(D(2026, 2, 7))["normal_low"]) == ("47", "23")
+    assert climo.half_up(46.5) == 47 and climo.half_up(47.5) == 48 and climo.half_up(28.8) == 29
+
+def test_record_ties_keep_all_years():
+    from calendar_core import climo
+    c = climo.day(D(2026, 4, 19)); assert (c["record_high"], c["record_high_years"]) == ("85", "1958;2002")   # the NWS lists both years
