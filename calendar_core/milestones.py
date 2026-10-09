@@ -14,14 +14,13 @@ def _hour(h): return f"{h % 12 or 12} {'AM' if h < 12 else 'PM'}"
 
 def sun_milestones(year):
     days = list(_days(year)); out = []
-    sec = {d: astro.sun_ephem(d) for d in days}
+    sec = {d: astro.sun_precise(d) for d in days}
     def tod(t): return t.hour * 3600 + t.minute * 60 + t.second
     for label, idx, fn in (("Earliest sunrise", 0, min), ("Latest sunrise", 0, max), ("Earliest sunset", 1, min), ("Latest sunset", 1, max)):
         d = fn(days, key=lambda x: tod(sec[x][idx]))
-        r, s, _ = astro.sun_minutes(d)
+        r, s = astro.sun_minutes(d)
         out.append((f"sun:{label.lower().replace(' ', '_')}:{year}", f"{label} of the year ({_clock(r if idx == 0 else s)})", d, SKY,
                     "Sunrise/sunset: upper limb, standard refraction, Eastern Time."))
-    mins = {d: astro.sun_minutes(d)[:2] for d in days}
     def longest_run(ok):
         runs, cur = [], [ok[0]]
         for d in ok[1:]:
@@ -35,7 +34,7 @@ def sun_milestones(year):
         run = longest_run(ok)
         if run[0] != days[0]: out.append((f"sun:first_{tag}:{year}", f"First {label}", run[0], SKY, ""))
         if run[-1] != days[-1]: out.append((f"sun:last_{tag}:{year}", f"Last {label}", run[-1], SKY, ""))
-    mins = {d: astro.sun_minutes(d)[:2] for d in days}
+    mins = {d: astro.sun_minutes(d) for d in days}
     for h in (6, 7, 8, 9):           # sunsets at/after a round PM hour
         crossing(f"set_{h}pm", f"sunset at/after {_hour(h + 12)}", lambda d, h=h: mins[d][1] >= (h + 12) * 60)
     for h in (6, 7, 8):              # sunrises before a round AM hour

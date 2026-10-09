@@ -163,7 +163,7 @@ def month_page(c, year, month, items, cats, opts, report):
                 c.drawRightString(x + cw - 17, ytop - 11.5, lab.upper())
             liney = ybot + 3
             if sun_on and inm:
-                rise, sset, _ = astro.sun_times(d); parts = []
+                rise, sset = astro.sun_times(d); parts = []
                 if opts.sun: parts.append(f"rise {rise}  set {sset}")
                 if opts.daylight:
                     ln, ch = astro.daylight(d); parts.append(f"{ln}  {ch}")

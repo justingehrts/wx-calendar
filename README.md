@@ -56,12 +56,14 @@ Variables: `CALENDAR_PASSCODE`, `LITESTREAM_REPLICA_URL`, `LITESTREAM_ACCESS_KEY
 This path is also untested (no Docker daemon in the authoring environment).
 
 ## Data sources
-- **Sunrise/sunset**: calculated with PyEphem to the second (upper limb of the Sun, standard refraction: the U.S. Naval Observatory
-  definition) and printed **truncated to the whole minute**, which is how the NWS climate reports and timeanddate.com print them
-  (verified against every day of October 2026 on both). USNO and the NOAA GML solar calculator **round** to the nearest minute, so they
-  can differ by 1 minute on about half of the days. Day length is truncated the same way. Optional USNO data (bundled for 2026; fetch other
-  years in Settings) is used as a consistency check. PyEphem agrees with USNO to within 0.52 minute on every day of 2026.
-- **Moon phases and seasons**: PyEphem, converted to Eastern before taking the date.
+- **Sunrise/sunset**: NOAA's solar-calculator algorithm (the method behind the NOAA GML web calculator; upper limb of the Sun, standard
+  refraction) evaluated at 39.99 N, 83.00 W, and printed **truncated to the whole minute**. That reproduces the NWS Wilmington climate
+  reports for Columbus on 339 of 342 values in 2026 (the 3 misses are within a second of a minute boundary), and all of timeanddate.com's
+  October table. The point was fitted to the NWS output; on dates held out of the fit it still matched 98%. The airport's coordinates fit
+  much worse, so the NWS evidently does not use them. USNO and NOAA GML **round** to the nearest minute instead, so they differ from the NWS
+  by 1 minute on about half the days. Nothing is downloaded: it works for any year. Day length and its daily change come from PyEphem
+  (matches timeanddate.com to about a second).
+- **Moon phases, seasons and DST**: PyEphem, converted to Eastern before taking the date.
 - **Normals (1991-2020) and daily records**: RCC-ACIS, **threaded** station `CMHthr` ("Columbus Area", the long-term record NWS uses; plain `CMH` is the airport alone and has a shorter record, so its daily records differ). Stored by month-day in `reference/climo_CMHthr_md.csv`.
 - **Climo milestones**: computed from CMHthr daily data (`reference/climo_CMHthr_stats_v2.json`). Averages are mean dates over 1991-2020; earliest/latest use the whole record (1878 on), counting only years with at least 95% data coverage of the relevant window. Thresholds: last/first
   32° freeze (min temp), first/last 80° and 90° day (max temp), first/last measurable (≥0.1") and ≥1" snowfall (seasons Jul 1-Jun 30).

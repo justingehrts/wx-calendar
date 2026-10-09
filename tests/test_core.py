@@ -26,14 +26,20 @@ def test_principal_moon_phases_eastern():
     full = sorted(d for d, l in astro.principal_phases(2026).items() if l == "Full" and d.month in (10, 11, 12))
     assert full == [D(2026, 10, 26), D(2026, 11, 24), D(2026, 12, 23)]
 
-def test_dst_transition_days_and_usno_vs_ephem():
-    assert astro.sun_times(D(2026, 10, 31))[:2] == ("7:59", "6:30") and astro.sun_times(D(2026, 11, 1))[:2] == ("7:01", "5:29")
-    worst = 0
-    for k, v in astro.usno_data(2026).items():
-        d = D.fromisoformat(k); sr, ss = astro.sun_ephem(d)
-        h = lambda s: int(s[:2]) * 60 + int(s[3:])
-        worst = max(worst, abs(h(v["rise"]) - (sr.hour * 60 + sr.minute + sr.second / 60)), abs(h(v["set"]) - (ss.hour * 60 + ss.minute + ss.second / 60)))
-    assert len(astro.usno_data(2026)) == 365 and worst < 1.0
+def _fixture(name):
+    import json, os
+    return json.load(open(os.path.join(os.path.dirname(__file__), "fixtures", name)))
+
+def test_dst_transition_days_and_agreement_with_usno_and_pyephem():
+    assert astro.sun_times(D(2026, 10, 31)) == ("7:59", "6:30") and astro.sun_times(D(2026, 11, 1)) == ("7:01", "5:29")
+    usno, worst_usno, worst_pe = _fixture("usno_2026.json"), 0, 0
+    mins = lambda t: t.hour * 60 + t.minute + t.second / 60
+    h = lambda s: int(s[:2]) * 60 + int(s[3:])
+    for k, v in usno.items():
+        d = D.fromisoformat(k); sr, ss = astro.sun_precise(d); pr, ps = astro.sun_pyephem(d)
+        worst_usno = max(worst_usno, abs(h(v["rise"]) - mins(sr)), abs(h(v["set"]) - mins(ss)))     # USNO rounds: ~0.5 min plus the location offset
+        worst_pe = max(worst_pe, abs(mins(pr) - mins(sr)), abs(mins(ps) - mins(ss)))
+    assert len(usno) == 365 and worst_usno < 0.75 and worst_pe < 0.25                              # independent engines agree within ~15 s
 
 def test_daylight_shape():
     ln, ch = astro.daylight(D(2026, 6, 20)); assert ln.startswith("15:") and ch[0] in "+-"
@@ -190,7 +196,7 @@ def test_store_roundtrip_file_and_database_modes(tmp_path, monkeypatch):
     from calendar_core import store, paths
     monkeypatch.setattr(paths, "CACHE", str(tmp_path / "cache"))
     store._mem.clear(); store.write("x.json", '{"a": 1}'); assert store.load_json("x.json") == {"a": 1} and store.has_cached("x.json")
-    assert store.load_text("astro_usno_2026.json")            # bundled reference file is the fallback
+    assert store.load_text("meteor_showers.json")             # bundled reference file is the fallback
     # database mode: same API, backed by the cache_files table (libsql local file stands in for Turso)
     c = db.connect(str(tmp_path / "remote.db"), libsql=True)
     monkeypatch.setattr(store, "_remote", lambda: True); monkeypatch.setattr(db, "connect", lambda *a, **k: c)
@@ -309,15 +315,20 @@ TD_LEN = "11:45:46 11:43:10 11:40:34 11:37:58 11:35:23 11:32:48 11:30:13 11:27:3
 def test_sunrise_sunset_are_truncated_to_the_minute_like_nws_and_timeanddate():
     # NWS climate report: Oct 10 sunset is 6:59 PM (true time 6:59:52); USNO/NOAA GML round it to 7:00
     assert astro.sun_times(D(2026, 10, 10))[1] == "6:59"
-    for i in range(31):          # every day of October 2026 matches timeanddate's table, with or without USNO data
+    for i in range(31):          # every day of October 2026 matches timeanddate's table
         d = D(2026, 10, i + 1)
         assert astro.sun_times(d)[:2] == (TD_RISE[i], TD_SET[i]), d
         h, m, s = (int(x) for x in TD_LEN[i].split(":"))
         assert astro.daylight(d)[0] == f"{h}:{m:02d}", d
-        sr, ss = astro.sun_ephem(d); assert abs((ss - sr).total_seconds() - (h * 3600 + m * 60 + s)) <= 1.5
+        sr, ss = astro.sun_pyephem(d); assert abs((ss - sr).total_seconds() - (h * 3600 + m * 60 + s)) <= 1.5
 
-def test_truncation_never_leaves_usno_s_rounding_window():
-    for i in range(365):
-        d = D(2026, 1, 1) + dt.timedelta(days=i); u = astro.usno_data(2026)[d.isoformat()]
-        r, s, _ = astro.sun_minutes(d); hm = lambda x: int(x[:2]) * 60 + int(x[3:5])
-        assert hm(u["rise"]) - 1 <= r <= hm(u["rise"]) and hm(u["set"]) - 1 <= s <= hm(u["set"])
+def test_matches_nws_climate_reports_for_columbus():
+    """Every sunrise/sunset the NWS printed in its 2026 Columbus climate reports (342 values)."""
+    nws = _fixture("nws_sun_2026.json")["data"]; miss = []
+    for k, (r, s) in nws.items():
+        d = D.fromisoformat(k); sr, ss = astro.sun_precise(d)
+        for name, tm, want in (("rise", sr, r), ("set", ss, s)):
+            if tm.hour * 60 + tm.minute != want: miss.append((k, name, tm.strftime("%H:%M:%S"), want))
+    assert len(nws) > 150 and len(miss) <= 6, miss                       # 339 of 342 match today
+    for k, name, tm, want in miss:                                       # a miss is only allowed within 2 s of a minute boundary
+        sec = int(tm[-2:]); assert sec <= 2 or sec >= 58, (k, name, tm, want)

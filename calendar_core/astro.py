@@ -1,14 +1,17 @@
-"""Sun and moon for Columbus, OH. Sunrise/sunset: PyEphem to the second (upper limb, standard refraction,
-the USNO definition), printed truncated to the minute like the NWS; USNO data (optional, cached per year) is a cross-check. Moon phases: PyEphem.
-All times Eastern, DST handled via America/New_York rules."""
-import datetime as dt, json, os, math, threading, time, urllib.parse, urllib.request
-from concurrent.futures import ThreadPoolExecutor
+"""Sun and moon for Columbus, OH. Sunrise/sunset: NOAA's solar-calculator algorithm (solar.py) at the
+reference point the NWS climate reports appear to use, printed TRUNCATED to the minute like those reports
+(USNO and NOAA GML round instead). Moon phases, seasons and DST: PyEphem. All times Eastern, DST via
+America/New_York rules."""
+import datetime as dt, math
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 import ephem
-from . import store
+from . import solar
 
-LAT, LON, ELEV = "39.9612", "-82.9988", 235
+LAT, LON, ELEV = "39.9612", "-82.9988", 235     # PyEphem observer (cross-checks only)
+# Point used for sunrise/sunset. Fitted to the NWS climate reports for Columbus (99% exact over 342 values, 98% on held-out
+# dates); the airport coordinates fit far worse. It is within ~3 km of downtown, i.e. a few seconds of sun time.
+SUN_LAT, SUN_LON_EAST = 39.99, -83.00
 ET, UTC = ZoneInfo("America/New_York"), ZoneInfo("UTC")
 USNO_URL = "https://aa.usno.navy.mil/api/rstt/oneday"
 
@@ -20,76 +23,46 @@ def _obs():
 def to_et(e): return e.datetime().replace(tzinfo=UTC).astimezone(ET)
 def _utc_midnight_et(d): return ephem.Date(dt.datetime.combine(d, dt.time(0), tzinfo=ET).astimezone(UTC).replace(tzinfo=None))
 
-# ---- USNO cache (see store.py)
-def usno_name(year): return f"astro_usno_{year}.json"
-def usno_data(year): return store.load_json(usno_name(year)) or {}
-
-def _fetch_day(d):
-    off = int(dt.datetime(d.year, d.month, d.day, 12, tzinfo=ET).utcoffset().total_seconds() // 3600)
-    q = urllib.parse.urlencode({"date": d.isoformat(), "coords": f"{LAT},{LON}", "tz": off, "dst": "false"})
-    j = json.load(urllib.request.urlopen(f"{USNO_URL}?{q}", timeout=30))
-    data = j.get("properties", {}).get("data", j.get("data", {}))
-    sun = {e["phen"]: e["time"] for e in data["sundata"]}
-    return d.isoformat(), {"rise": sun["Rise"], "set": sun["Set"]}
-
-def fetch_usno_year(year, progress=None, workers=4):
-    """Fetch a whole year (~1.5 min with 4 workers) and write the cache atomically.
-    Returns number of days fetched. Days that fail are left out (fallback fills them)."""
-    days, d = [], dt.date(year, 1, 1)
-    while d.year == year: days.append(d); d += dt.timedelta(days=1)
-    out, done = {}, [0]
-    def work(day):
-        for attempt in range(3):
-            try: k, v = _fetch_day(day); out[k] = v; break
-            except Exception: time.sleep(1 + attempt)
-        done[0] += 1
-        if progress: progress(done[0], len(days))
-    with ThreadPoolExecutor(workers) as ex: list(ex.map(work, days))
-    if out: store.write(usno_name(year), json.dumps(dict(sorted(out.items()))))
-    return len(out)
-
 # ---- sun times
 def _fmt12(m): return f"{(m // 60) % 12 or 12}:{m % 60:02d}"
+
 @lru_cache(maxsize=4000)
-def sun_ephem(d):
-    """(rise, set) as aware Eastern datetimes (with seconds)."""
+def sun_precise(d):
+    """(rise, set) as aware Eastern datetimes, to the second (NOAA algorithm)."""
+    out = []
+    for rise in (True, False):
+        utc_min = solar.event_utc_minutes(d, SUN_LAT, SUN_LON_EAST, rise)
+        t = dt.datetime.combine(d, dt.time(0), tzinfo=UTC) + dt.timedelta(minutes=utc_min)
+        out.append(t.astimezone(ET))
+    return tuple(out)
+
+@lru_cache(maxsize=4000)
+def sun_pyephem(d):
+    """(rise, set) from PyEphem at the downtown point: an independent cross-check of sun_precise."""
     o = _obs(); o.date = _utc_midnight_et(d)
     return to_et(o.next_rising(ephem.Sun())), to_et(o.next_setting(ephem.Sun()))
 
 def sun_minutes(d):
-    """(rise, set, source) as minutes after midnight (24h clock), TRUNCATED to the whole minute (seconds
-    dropped), which is how the NWS climate reports and timeanddate.com print sunrise/sunset. (USNO and the
-    NOAA GML calculator round to the nearest minute instead, so they can differ by 1 minute.)
-    Computed from PyEphem to the second; where cached USNO data exists it is used as a consistency check:
-    USNO rounds, so the true truncated minute can only be USNO's value or one less."""
-    sr, ss = sun_ephem(d)
-    r, s_ = sr.hour * 60 + sr.minute, ss.hour * 60 + ss.minute
-    u = usno_data(d.year).get(d.isoformat()); src = "ephem"
-    if u:
-        h = lambda x: int(x[:2]) * 60 + int(x[3:5])
-        ur, us = h(u["rise"]), h(u["set"])
-        r, s_, src = min(max(r, ur - 1), ur), min(max(s_, us - 1), us), "usno+ephem"
-    return r, s_, src
+    """(rise, set) as minutes after midnight (24h clock), TRUNCATED to the whole minute (seconds dropped),
+    which is how the NWS climate reports and timeanddate.com print them."""
+    sr, ss = sun_precise(d)
+    return sr.hour * 60 + sr.minute, ss.hour * 60 + ss.minute
 
 def sun_times(d):
-    """(rise, set, source) display strings in 12-hour form, e.g. ('7:01', '5:30', 'usno')."""
-    r, s, src = sun_minutes(d)
-    return _fmt12(r), _fmt12(s), src
+    """(rise, set) display strings in 12-hour form, e.g. ('7:01', '5:29')."""
+    r, s = sun_minutes(d)
+    return _fmt12(r), _fmt12(s)
 
 def daylight(d):
-    """(length 'H:MM', change vs previous day '+m:ss' / '-m:ss'). Both come from PyEphem to the second; the
-    length is truncated to the minute like the printed sunrise/sunset (so it can differ by a minute from
-    subtracting the two printed times)."""
-    def secs(x): a, b = sun_ephem(x); return (b - a).total_seconds()
+    """(length 'H:MM', change vs previous day '+m:ss' / '-m:ss'). Computed with PyEphem, which matches
+    timeanddate.com's day lengths to about a second (the NWS does not publish day length). The length is
+    truncated to the minute like the printed sunrise/sunset, so it can differ by a minute from subtracting
+    the two printed times."""
+    def secs(x): a, b = sun_pyephem(x); return (b - a).total_seconds()
     n = int(secs(d) // 60)
     delta = round(secs(d) - secs(d - dt.timedelta(days=1)))
     sign = "+" if delta >= 0 else "-"; delta = abs(delta)
     return f"{n // 60}:{n % 60:02d}", f"{sign}{delta // 60}:{delta % 60:02d}"
-
-def data_source(year):
-    """'usno' if every day of the year is in the USNO cache, 'partial', or 'ephem'."""
-    n = len(usno_data(year)); full = 366 if (year % 4 == 0 and (year % 100 or year % 400 == 0)) else 365
-    return "usno" if n >= full else ("partial" if n else "ephem")
 
 # ---- moon
 @lru_cache(maxsize=8)

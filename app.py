@@ -4,7 +4,7 @@ import streamlit as st
 from calendar_core import astro, climo, db, ical, importers, milestones, patterns, preview, recurrence, render_pdf as R
 
 st.set_page_config(page_title="Weathercast Planning Calendar", layout="wide")
-APP_VERSION = "2026-10-09a"
+APP_VERSION = "2026-10-10a"
 
 # Hosted database settings may come from Streamlit secrets; the storage layer reads the environment.
 for _k in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
@@ -73,7 +73,7 @@ with st.sidebar:
         st.download_button(f"Download {st.session_state['pdf'][0]}", st.session_state["pdf"][1], st.session_state["pdf"][0], "application/pdf")
     st.divider()
     st.caption(f"App version {APP_VERSION}  |  storage: {'hosted database' if db.turso_config() else 'local file'}")
-    st.caption("Sunrise/sunset: Naval Observatory definition, truncated to the minute like the NWS climate report; moon: PyEphem; normals (1991-2020) and records: RCC-ACIS, Columbus Area (threaded record, CMHthr).")
+    st.caption("Sunrise/sunset: NOAA solar-calculator algorithm, truncated to the minute like the NWS climate report; moon: PyEphem; normals (1991-2020) and records: RCC-ACIS, Columbus Area (threaded record, CMHthr).")
 
 tab_events, tab_cats, tab_ms, tab_hist, tab_set = st.tabs(["Events", "Categories", "Milestones", "History & trash", "Settings"])
 
@@ -291,15 +291,8 @@ with tab_hist:
 # ------------------------------------------------------------------ settings
 with tab_set:
     st.subheader("Data for " + str(year))
-    src = astro.data_source(year)
-    st.write("Sunrise/sunset are calculated (PyEphem, upper limb with standard refraction) and printed **truncated to the whole minute**, matching the NWS climate report. "
-             f"U.S. Naval Observatory data for {year} is {'loaded and used as a cross-check' if src != 'ephem' else 'not loaded (optional)'}; it rounds to the nearest minute, so it can differ by 1 minute.")
-    if st.button(f"(Optional) fetch {year} sunrise/sunset from the U.S. Naval Observatory as a cross-check (takes about 2 minutes)"):
-        bar = st.progress(0.0)
-        try:
-            n = astro.fetch_usno_year(year, lambda i, t: bar.progress(i / t), workers=6)
-            st.success(f"Fetched {n} days.") if n else st.error("USNO could not be reached; still using the built-in calculation.")
-        except Exception as ex: st.error(f"USNO fetch failed: {ex}")
+    st.write("Sunrise/sunset are calculated with NOAA's solar-calculator algorithm (upper limb of the Sun, standard refraction) and printed "
+             "**truncated to the whole minute**, matching the NWS climate report. There is nothing to download: it works for any year.")
     st.write(f"Climate normals/records: {'loaded' if climo.table() else 'missing'}; 1991-2020 statistics: {'loaded' if climo.stats() else 'missing'}")
     if st.button("Refresh normals, records and statistics from RCC-ACIS"):
         try: climo.fetch_normals_records(); climo.fetch_stats(); st.success("Climate data refreshed.")
