@@ -13,7 +13,6 @@ LAT, LON, ELEV = "39.9612", "-82.9988", 235     # PyEphem observer (cross-checks
 # dates); the airport coordinates fit far worse. It is within ~3 km of downtown, i.e. a few seconds of sun time.
 SUN_LAT, SUN_LON_EAST = 39.99, -83.00
 ET, UTC = ZoneInfo("America/New_York"), ZoneInfo("UTC")
-USNO_URL = "https://aa.usno.navy.mil/api/rstt/oneday"
 
 def _obs():
     o = ephem.Observer(); o.lat, o.lon, o.elevation = LAT, LON, ELEV

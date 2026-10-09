@@ -12,7 +12,7 @@ Location for all sun, moon and climate data: Columbus, OH (39.9612 N, 82.9988 W;
 - **Categories**: color + black-and-white style per category, contrast check, legend preview in color and B&W.
 - **Milestones**: proposed sun, sky, DST, meteor-shower and climo entries to accept or reject.
 - **History & trash**: every change is logged; undo; deleted events go to the trash.
-- **Settings**: fetch USNO sunrise/sunset for a year, refresh ACIS climate data, add federal holidays, year rollover, database download.
+- **Settings**: refresh ACIS climate data, add federal holidays, year rollover, database download.
 - **Print options** (sidebar): what shows on each day, color/B&W, grayscale preview, Sunday/Monday start, paper size, smaller bars.
 - The PDF never silently drops an event: anything that does not fit is listed on the app screen and on the details page.
 

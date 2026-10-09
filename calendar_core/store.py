@@ -1,4 +1,4 @@
-"""Fetched data files (USNO years, ACIS tables). Stored in the database when a hosted database is
+"""Fetched data files (ACIS climate tables). Stored in the database when a hosted database is
 configured (so they survive restarts on ephemeral-disk hosts), otherwise in data/cache/. Falls back to
 the bundled files in reference/."""
 import json, os, time
