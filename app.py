@@ -4,7 +4,7 @@ import streamlit as st
 from calendar_core import astro, climo, db, ical, importers, milestones, patterns, preview, recurrence, render_pdf as R
 
 st.set_page_config(page_title="Weathercast Planning Calendar", layout="wide")
-APP_VERSION = "2026-10-08e"
+APP_VERSION = "2026-10-09a"
 
 # Hosted database settings may come from Streamlit secrets; the storage layer reads the environment.
 for _k in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
@@ -72,11 +72,8 @@ with st.sidebar:
     if "pdf" in st.session_state:
         st.download_button(f"Download {st.session_state['pdf'][0]}", st.session_state["pdf"][1], st.session_state["pdf"][0], "application/pdf")
     st.divider()
-    src = astro.data_source(year)
-    if src != "usno":
-        st.warning("Sunrise/sunset: using built-in calculation" + (" (USNO data incomplete)" if src == "partial" else f" (no USNO data loaded for {year}; see Settings)"))
     st.caption(f"App version {APP_VERSION}  |  storage: {'hosted database' if db.turso_config() else 'local file'}")
-    st.caption(f"Sun and moon: U.S. Naval Observatory{'' if src == 'usno' else ' / PyEphem'}; normals (1991-2020) and records: RCC-ACIS, Columbus Area (threaded record, CMHthr).")
+    st.caption("Sunrise/sunset: Naval Observatory definition, truncated to the minute like the NWS climate report; moon: PyEphem; normals (1991-2020) and records: RCC-ACIS, Columbus Area (threaded record, CMHthr).")
 
 tab_events, tab_cats, tab_ms, tab_hist, tab_set = st.tabs(["Events", "Categories", "Milestones", "History & trash", "Settings"])
 
@@ -295,8 +292,9 @@ with tab_hist:
 with tab_set:
     st.subheader("Data for " + str(year))
     src = astro.data_source(year)
-    st.write(f"Sunrise/sunset source: **{ {'usno': 'U.S. Naval Observatory (cached)', 'partial': 'USNO, incomplete (gaps use built-in calculation)', 'ephem': 'built-in calculation (PyEphem)'}[src] }**")
-    if st.button(f"Fetch {year} sunrise/sunset from the U.S. Naval Observatory (takes about 2 minutes)"):
+    st.write("Sunrise/sunset are calculated (PyEphem, upper limb with standard refraction) and printed **truncated to the whole minute**, matching the NWS climate report. "
+             f"U.S. Naval Observatory data for {year} is {'loaded and used as a cross-check' if src != 'ephem' else 'not loaded (optional)'}; it rounds to the nearest minute, so it can differ by 1 minute.")
+    if st.button(f"(Optional) fetch {year} sunrise/sunset from the U.S. Naval Observatory as a cross-check (takes about 2 minutes)"):
         bar = st.progress(0.0)
         try:
             n = astro.fetch_usno_year(year, lambda i, t: bar.progress(i / t), workers=6)

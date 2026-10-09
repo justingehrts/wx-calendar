@@ -56,9 +56,11 @@ Variables: `CALENDAR_PASSCODE`, `LITESTREAM_REPLICA_URL`, `LITESTREAM_ACCESS_KEY
 This path is also untested (no Docker daemon in the authoring environment).
 
 ## Data sources
-- **Sunrise/sunset**: U.S. Naval Observatory API (upper limb, standard refraction), cached per year (in `data/cache/`, or in the database when hosted).
-  2026 is bundled in `reference/`. For other years use Settings > fetch (about 2 minutes). Until then, a PyEphem calculation
-  with the same definition is used (it agreed with USNO to within 0.52 minute on every day of 2026) and the app says so.
+- **Sunrise/sunset**: calculated with PyEphem to the second (upper limb of the Sun, standard refraction: the U.S. Naval Observatory
+  definition) and printed **truncated to the whole minute**, which is how the NWS climate reports and timeanddate.com print them
+  (verified against every day of October 2026 on both). USNO and the NOAA GML solar calculator **round** to the nearest minute, so they
+  can differ by 1 minute on about half of the days. Day length is truncated the same way. Optional USNO data (bundled for 2026; fetch other
+  years in Settings) is used as a consistency check. PyEphem agrees with USNO to within 0.52 minute on every day of 2026.
 - **Moon phases and seasons**: PyEphem, converted to Eastern before taking the date.
 - **Normals (1991-2020) and daily records**: RCC-ACIS, **threaded** station `CMHthr` ("Columbus Area", the long-term record NWS uses; plain `CMH` is the airport alone and has a shorter record, so its daily records differ). Stored by month-day in `reference/climo_CMHthr_md.csv`.
 - **Climo milestones**: computed from CMHthr daily data (`reference/climo_CMHthr_stats_v2.json`). Averages are mean dates over 1991-2020; earliest/latest use the whole record (1878 on), counting only years with at least 95% data coverage of the relevant window. Thresholds: last/first

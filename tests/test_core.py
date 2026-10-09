@@ -27,7 +27,7 @@ def test_principal_moon_phases_eastern():
     assert full == [D(2026, 10, 26), D(2026, 11, 24), D(2026, 12, 23)]
 
 def test_dst_transition_days_and_usno_vs_ephem():
-    assert astro.sun_times(D(2026, 10, 31))[:2] == ("8:00", "6:31") and astro.sun_times(D(2026, 11, 1))[:2] == ("7:01", "5:30")
+    assert astro.sun_times(D(2026, 10, 31))[:2] == ("7:59", "6:30") and astro.sun_times(D(2026, 11, 1))[:2] == ("7:01", "5:29")
     worst = 0
     for k, v in astro.usno_data(2026).items():
         d = D.fromisoformat(k); sr, ss = astro.sun_ephem(d)
@@ -299,3 +299,25 @@ def test_leap_year_dates_are_not_shifted():
     assert climo.summary("last_freeze", 2028, st)[2][0] == D(2028, 5, 16)
     assert climo.summary("last_freeze", 2026, st)[2][1] == 2016                      # May 16 also happened in 1959: tie shows the most recent year
     assert climo.place("last_freeze", 2026, 0) == D(2026, 1, 1) and climo.place("first_snow_1in", 2024, (D(2001, 2, 28) - D(2001, 7, 1)).days + 365) == D(2024, 2, 28)
+
+
+# timeanddate.com's October 2026 table for Columbus (sunrise AM, sunset PM, length h:mm:ss), used as a reference
+TD_RISE = "7:28 7:29 7:30 7:31 7:32 7:33 7:34 7:35 7:36 7:37 7:38 7:39 7:40 7:41 7:42 7:43 7:44 7:45 7:46 7:47 7:48 7:50 7:51 7:52 7:53 7:54 7:55 7:56 7:57 7:58 7:59".split()
+TD_SET = "7:14 7:12 7:10 7:09 7:07 7:06 7:04 7:02 7:01 6:59 6:58 6:56 6:55 6:53 6:52 6:50 6:49 6:47 6:46 6:45 6:43 6:42 6:40 6:39 6:38 6:36 6:35 6:34 6:33 6:31 6:30".split()
+TD_LEN = "11:45:46 11:43:10 11:40:34 11:37:58 11:35:23 11:32:48 11:30:13 11:27:38 11:25:04 11:22:29 11:19:56 11:17:22 11:14:49 11:12:17 11:09:44 11:07:13 11:04:42 11:02:11 10:59:41 10:57:12 10:54:43 10:52:15 10:49:48 10:47:21 10:44:56 10:42:31 10:40:07 10:37:44 10:35:22 10:33:01 10:30:41".split()
+
+def test_sunrise_sunset_are_truncated_to_the_minute_like_nws_and_timeanddate():
+    # NWS climate report: Oct 10 sunset is 6:59 PM (true time 6:59:52); USNO/NOAA GML round it to 7:00
+    assert astro.sun_times(D(2026, 10, 10))[1] == "6:59"
+    for i in range(31):          # every day of October 2026 matches timeanddate's table, with or without USNO data
+        d = D(2026, 10, i + 1)
+        assert astro.sun_times(d)[:2] == (TD_RISE[i], TD_SET[i]), d
+        h, m, s = (int(x) for x in TD_LEN[i].split(":"))
+        assert astro.daylight(d)[0] == f"{h}:{m:02d}", d
+        sr, ss = astro.sun_ephem(d); assert abs((ss - sr).total_seconds() - (h * 3600 + m * 60 + s)) <= 1.5
+
+def test_truncation_never_leaves_usno_s_rounding_window():
+    for i in range(365):
+        d = D(2026, 1, 1) + dt.timedelta(days=i); u = astro.usno_data(2026)[d.isoformat()]
+        r, s, _ = astro.sun_minutes(d); hm = lambda x: int(x[:2]) * 60 + int(x[3:5])
+        assert hm(u["rise"]) - 1 <= r <= hm(u["rise"]) and hm(u["set"]) - 1 <= s <= hm(u["set"])

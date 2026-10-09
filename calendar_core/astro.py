@@ -1,5 +1,5 @@
-"""Sun and moon for Columbus, OH. Sunrise/sunset: USNO API (cached per year) with a PyEphem
-fallback using the same definition (upper limb, standard refraction). Moon phases: PyEphem.
+"""Sun and moon for Columbus, OH. Sunrise/sunset: PyEphem to the second (upper limb, standard refraction,
+the USNO definition), printed truncated to the minute like the NWS; USNO data (optional, cached per year) is a cross-check. Moon phases: PyEphem.
 All times Eastern, DST handled via America/New_York rules."""
 import datetime as dt, json, os, math, threading, time, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -57,14 +57,19 @@ def sun_ephem(d):
     return to_et(o.next_rising(ephem.Sun())), to_et(o.next_setting(ephem.Sun()))
 
 def sun_minutes(d):
-    """(rise, set, source) as minutes after midnight (24h clock), rounded to the minute like USNO."""
-    u = usno_data(d.year).get(d.isoformat())
-    if u:
-        h = lambda s: int(s[:2]) * 60 + int(s[3:5])
-        return h(u["rise"]), h(u["set"]), "usno"
+    """(rise, set, source) as minutes after midnight (24h clock), TRUNCATED to the whole minute (seconds
+    dropped), which is how the NWS climate reports and timeanddate.com print sunrise/sunset. (USNO and the
+    NOAA GML calculator round to the nearest minute instead, so they can differ by 1 minute.)
+    Computed from PyEphem to the second; where cached USNO data exists it is used as a consistency check:
+    USNO rounds, so the true truncated minute can only be USNO's value or one less."""
     sr, ss = sun_ephem(d)
-    m = lambda t: (t + dt.timedelta(seconds=30)).hour * 60 + (t + dt.timedelta(seconds=30)).minute
-    return m(sr), m(ss), "ephem"
+    r, s_ = sr.hour * 60 + sr.minute, ss.hour * 60 + ss.minute
+    u = usno_data(d.year).get(d.isoformat()); src = "ephem"
+    if u:
+        h = lambda x: int(x[:2]) * 60 + int(x[3:5])
+        ur, us = h(u["rise"]), h(u["set"])
+        r, s_, src = min(max(r, ur - 1), ur), min(max(s_, us - 1), us), "usno+ephem"
+    return r, s_, src
 
 def sun_times(d):
     """(rise, set, source) display strings in 12-hour form, e.g. ('7:01', '5:30', 'usno')."""
@@ -72,10 +77,11 @@ def sun_times(d):
     return _fmt12(r), _fmt12(s), src
 
 def daylight(d):
-    """(length 'H:MM' from displayed rise/set, change vs previous day 'm:ss' string with sign).
-    Change uses PyEphem seconds so it is not quantized to whole minutes."""
-    rm, sm, _ = sun_minutes(d); n = sm - rm
+    """(length 'H:MM', change vs previous day '+m:ss' / '-m:ss'). Both come from PyEphem to the second; the
+    length is truncated to the minute like the printed sunrise/sunset (so it can differ by a minute from
+    subtracting the two printed times)."""
     def secs(x): a, b = sun_ephem(x); return (b - a).total_seconds()
+    n = int(secs(d) // 60)
     delta = round(secs(d) - secs(d - dt.timedelta(days=1)))
     sign = "+" if delta >= 0 else "-"; delta = abs(delta)
     return f"{n // 60}:{n % 60:02d}", f"{sign}{delta // 60}:{delta % 60:02d}"
