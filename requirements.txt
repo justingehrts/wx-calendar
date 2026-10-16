@@ -6,3 +6,5 @@ openpyxl
 pypdfium2
 pillow
 libsql
+pyluach
+hijridate

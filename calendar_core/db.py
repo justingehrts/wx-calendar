@@ -312,15 +312,24 @@ def set_setting(con, key, value):
     con.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (key, json.dumps(value))); con.commit()
 
 # ----------------------------------------------------------- holidays/rollover
-def load_federal_holidays(con):
-    """Add the federal holidays as repeat rules; skips ones already present. Returns number added."""
+def load_holidays(con, set_keys=("federal",)):
+    """Add the chosen holiday sets as repeat rules (see holidays.py). Skips titles already present, so it is safe to repeat and
+    shared titles (Christmas) are added once. Returns {set_key: number added}."""
+    from . import holidays
     have = {e["title"] for e in events(con, include_deleted=True) if e["rule"]}
     cid = category_id_by_name(con, "Holidays") or categorize(con, "Holiday")
-    n = 0
-    for title, rule in recurrence.FEDERAL_HOLIDAYS:
-        if title in have: continue
-        add_event(con, title, f"{dt.date.today().year}-01-01", None, cid, rule=rule); n += 1
-    return n
+    added = {}
+    for key in set_keys:
+        _, _, items, flag = holidays.HOLIDAY_SETS[key]; n = 0
+        for title, rule in items:
+            if title in have: continue
+            add_event(con, title, f"{dt.date.today().year}-01-01", None, cid, rule=rule, flag=flag); have.add(title); n += 1
+        added[key] = n
+    return added
+
+def load_federal_holidays(con):
+    """Kept for compatibility: the federal set only. Returns the number added."""
+    return load_holidays(con, ["federal"])["federal"]
 
 def one_offs(con, year):
     """One-off (no repeat rule) events whose first day falls in `year` - these need review at rollover."""

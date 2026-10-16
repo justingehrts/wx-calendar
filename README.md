@@ -12,7 +12,7 @@ Location for all sun, moon and climate data: Columbus, OH (39.9612 N, 82.9988 W;
 - **Categories**: color + black-and-white style per category, contrast check, legend preview in color and B&W.
 - **Milestones**: proposed sun, sky, DST, meteor-shower and climo entries to accept or reject.
 - **History & trash**: every change is logged; undo; deleted events go to the trash.
-- **Settings**: refresh ACIS climate data, add federal holidays, year rollover, database download.
+- **Settings**: refresh ACIS climate data, add holiday sets (U.S. federal, Christian, Jewish, Muslim, other popular observances), year rollover, database download.
 - **Print options** (sidebar): what shows on each day, color/B&W, grayscale preview, Sunday/Monday start, paper size, smaller bars.
 - The PDF never silently drops an event: anything that does not fit is listed on the app screen and on the details page.
 
@@ -73,6 +73,12 @@ This path is also untested (no Docker daemon in the authoring environment).
   appear after Settings > Refresh.
 - **Climo milestones**: computed from CMHthr daily data (`reference/climo_CMHthr_stats_v2.json`). Averages are mean dates over 1991-2020; earliest/latest use the whole record (1878 on), counting only years with at least 95% data coverage of the relevant window. Thresholds: last/first
   32° freeze (min temp), first/last 80° and 90° day (max temp), first/last measurable (≥0.1") and ≥1" snowfall (seasons Jul 1-Jun 30).
+- **Holidays** (Settings > Holidays; every item is a repeat rule, so dates are calculated for any year and nothing is retyped at rollover):
+  U.S. federal (actual dates, not "observed" days); Christian (Western and Orthodox Easter and the days around it, Advent, Epiphany, Christmas Eve,
+  and more; Easter from the standard computus); Jewish (Hebrew-calendar dates via `pyluach`; each holiday begins at sundown the evening before
+  the first date shown; Purim moves to Adar II in leap years); Muslim (predicted from the Umm al-Qura calendar via `hijridate`, valid 1924-2077;
+  the observed day depends on moon sighting and can differ by a day, so those events carry a "predicted date: confirm" note in the Events tab and
+  can be overridden with 'Listed dates per year'); and optional popular observances (Mother's Day, Father's Day, Halloween, and others).
 - **Meteor showers**: `reference/meteor_showers.json` has *typical* peak dates. Add verified dates for a year under `"years"`
   (from the IMO or AMS calendar); until then the proposals say "typical date, not verified".
 

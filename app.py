@@ -1,10 +1,10 @@
 import datetime as dt, json, os, hmac
 import pandas as pd
 import streamlit as st
-from calendar_core import astro, climo, db, ical, importers, milestones, patterns, preview, recurrence, render_pdf as R
+from calendar_core import astro, climo, db, holidays, ical, importers, milestones, patterns, preview, recurrence, render_pdf as R
 
 st.set_page_config(page_title="Weathercast Planning Calendar", layout="wide")
-APP_VERSION = "2026-10-10b"
+APP_VERSION = "2026-10-16a"
 
 # Hosted database settings may come from Streamlit secrets; the storage layer reads the environment.
 for _k in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
@@ -129,7 +129,7 @@ with tab_events:
 
         with st.expander("Event details and repeat rules"):
             labels = {e["id"]: f"{e['start_date']}  {e['title']}" for e in snap}
-            eid = st.selectbox("Event", list(labels), format_func=labels.get, index=None, placeholder="Choose an event to edit…")
+            eid = st.selectbox("Event", list(labels), format_func=labels.get, index=None, placeholder="Choose an event to edit…", key="event_pick")
             if eid:
                 e = db.get_event(con, eid)
                 with st.form(f"detail{eid}"):
@@ -144,14 +144,20 @@ with tab_events:
                     donly = st.checkbox("Details page only (lower priority: keep off the calendar grid)", bool(e["detail_only"]))
                     st.markdown("**Repeat**")
                     rule = e["rule"] or {"kind": "one_off"}
-                    kind = st.selectbox("Repeats", recurrence.KINDS, recurrence.KINDS.index(rule["kind"]),
+                    kinds = recurrence.KINDS + ([rule["kind"]] if rule["kind"] in recurrence.CALCULATED_KINDS else [])
+                    kind = st.selectbox("Repeats", kinds, kinds.index(rule["kind"]),
                                         format_func=lambda k: {"one_off": "Does not repeat", "yearly_fixed": "Every year on a fixed date",
                                                                "yearly_nth_weekday": "Every year on the nth weekday of a month",
                                                                "weekly_in_range": "Certain weekdays between two dates (each year)",
-                                                               "lookup_by_year": "Listed dates per year", "yearly_relative": "Days from another rule"}[k])
-                    p = {"kind": kind}
+                                                               "lookup_by_year": "Listed dates per year", "yearly_relative": "Days from another rule",
+                                                               "easter_relative": "Calculated from Easter", "weekday_nearest": "Weekday nearest a date",
+                                                               "hebrew": "Calculated from the Hebrew calendar", "islamic": "Calculated from the Islamic calendar"}[k])
+                    p = dict(rule) if kind in recurrence.CALCULATED_KINDS else {"kind": kind}
                     r1, r2, r3 = st.columns(3)
-                    if kind == "yearly_fixed":
+                    if kind in recurrence.CALCULATED_KINDS:
+                        st.info(f"Calculated automatically for every year: {recurrence.describe(rule)}. To override it with dates you confirm yourself, "
+                                "choose 'Listed dates per year' above.")
+                    elif kind == "yearly_fixed":
                         p["month"] = r1.number_input("Month", 1, 12, rule.get("month", s.month)); p["day"] = r2.number_input("Day", 1, 31, rule.get("day", s.day))
                     elif kind == "yearly_nth_weekday":
                         p["month"] = r1.number_input("Month", 1, 12, rule.get("month", s.month))
@@ -298,9 +304,20 @@ with tab_set:
         try: climo.fetch_normals_records(); climo.fetch_stats(); st.success("Climate data refreshed.")
         except Exception as ex: st.error(f"ACIS fetch failed: {ex}")
     st.divider(); st.subheader("Holidays")
-    if st.button("Add the U.S. federal holidays (as repeating events)"):
-        n = db.load_federal_holidays(con); snapshot(); st.success(f"Added {n} holiday(s)." if n else "They are all already there.")
-    st.caption("They appear in the Holidays category; edit or delete any of them in the Events tab.")
+    keys = list(holidays.HOLIDAY_SETS)
+    chosen = st.multiselect("Holiday sets to add", keys, default=holidays.DEFAULT_SETS, format_func=lambda k: holidays.HOLIDAY_SETS[k][0])
+    for k in chosen: st.caption(f"**{holidays.HOLIDAY_SETS[k][0]}**: {holidays.HOLIDAY_SETS[k][1]}")
+    if chosen:
+        with st.expander(f"Preview the dates for {year}"):
+            rows = [{"set": holidays.HOLIDAY_SETS[k][0], "holiday": t, "dates": recurrence.format_dates(recurrence.dates_for_rule(rule, year)) or "(none this year)"}
+                    for k in chosen for t, rule in holidays.HOLIDAY_SETS[k][2]]
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    if st.button("Add the selected holidays (as repeating events)", disabled=not chosen):
+        added = db.load_holidays(con, chosen); snapshot()
+        total = sum(added.values())
+        st.success(f"Added {total} holiday(s): " + ", ".join(f"{holidays.HOLIDAY_SETS[k][0]} {n}" for k, n in added.items()) if total else "They are all already there.")
+    st.caption("Holidays are repeat rules, so they appear in every year automatically. They go in the Holidays category; edit or delete any of them in the Events tab. "
+               "Nothing is added twice.")
     st.divider(); st.subheader(f"Prepare {year + 1}")
     st.write("Repeating events (holidays and other rules) carry forward automatically. One-time events from "
              f"{year} are listed here to keep, move, or drop. Nothing is deleted.")

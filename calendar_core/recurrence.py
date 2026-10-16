@@ -2,6 +2,8 @@
 import calendar, datetime as dt
 
 KINDS = ["one_off", "yearly_fixed", "yearly_nth_weekday", "weekly_in_range", "lookup_by_year", "yearly_relative"]
+# Calculated automatically for any year (religious calendars); shown read-only in the rule editor
+CALCULATED_KINDS = ["easter_relative", "weekday_nearest", "hebrew", "islamic"]
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 def nth_weekday(year, month, weekday, n):
@@ -16,6 +18,43 @@ def nth_weekday(year, month, weekday, n):
 def _safe(year, month, day):
     try: return dt.date(year, month, day)
     except ValueError: return None     # Feb 29 in a non-leap year
+
+def easter(year, orthodox=False):
+    """Easter Sunday (Gregorian calendar date). Western: Meeus/Jones/Butcher; Orthodox: Julian computus + calendar offset."""
+    if not orthodox:
+        a, b, c = year % 19, year // 100, year % 100
+        d, e = b // 4, b % 4; f = (b + 8) // 25; g = (b - f + 1) // 3
+        h = (19 * a + b - d - g + 15) % 30; i, k = c // 4, c % 4
+        l = (32 + 2 * e + 2 * i - h - k) % 7; m = (a + 11 * h + 22 * l) // 451
+        return dt.date(year, (h + l - 7 * m + 114) // 31, (h + l - 7 * m + 114) % 31 + 1)
+    a, b, c = year % 4, year % 7, year % 19
+    d = (19 * c + 15) % 30; e = (2 * a + 4 * b - d + 34) % 7
+    julian = dt.date(year, (d + e + 114) // 31, (d + e + 114) % 31 + 1)
+    return julian + dt.timedelta(days=year // 100 - year // 400 - 2)       # Julian -> Gregorian (13 days in 1900-2099)
+
+def _span(start, days, year):
+    return [d for d in (start + dt.timedelta(days=i) for i in range(days)) if d.year == year]
+
+def hebrew_dates(rule, year):
+    """Gregorian dates in `year` for a Hebrew-calendar holiday: {month, day, days, late_adar}. Nisan=1 ... Elul=6, Tishrei=7 ... Adar=12
+    (Adar II = 13 in leap years when late_adar is set). Holidays begin at sundown the evening before the first date."""
+    from pyluach import dates, hebrewcal
+    out = set()
+    for hy in (year + 3760, year + 3761):
+        month = 13 if rule.get("late_adar") and rule["month"] == 12 and hebrewcal.Year(hy).leap else rule["month"]
+        out.update(_span(dates.HebrewDate(hy, month, rule["day"]).to_pydate(), rule.get("days", 1), year))
+    return sorted(out)
+
+def islamic_dates(rule, year):
+    """Gregorian dates in `year` for a Hijri-calendar date {month, day, days} using the Umm al-Qura calendar (valid 1924-2077).
+    The observed day depends on moon sighting and can differ by a day."""
+    from hijridate import Hijri
+    out = set()
+    for hy in range(year - 580, year - 576):               # a Gregorian year overlaps two or three Hijri years
+        try: g = Hijri(hy, rule["month"], rule["day"]).to_gregorian()
+        except (ValueError, OverflowError): continue          # outside the supported range
+        out.update(_span(dt.date(g.year, g.month, g.day), rule.get("days", 1), year))
+    return sorted(out)
 
 def dates_for_rule(rule, year):
     """Dates this rule produces in calendar `year` (sorted list)."""
@@ -38,6 +77,13 @@ def dates_for_rule(rule, year):
         return sorted(dt.date.fromisoformat(x) for x in rule.get("table", {}).get(str(year), []))
     if k == "yearly_relative":
         return [d + dt.timedelta(days=rule["offset"]) for d in dates_for_rule(rule["base"], year)]
+    if k == "easter_relative":
+        return _span(easter(year, rule.get("orthodox", False)) + dt.timedelta(days=rule["offset"]), rule.get("days", 1), year)
+    if k == "weekday_nearest":       # e.g. the Sunday nearest Nov 30 (first Sunday of Advent)
+        target = dt.date(year, rule["month"], rule["day"])
+        return [d for d in (target + dt.timedelta(days=i) for i in range(-3, 4)) if d.weekday() == rule["weekday"]][:1]
+    if k == "hebrew": return hebrew_dates(rule, year)
+    if k == "islamic": return islamic_dates(rule, year)
     return []
 
 def _shift(d, years):
@@ -75,19 +121,30 @@ def describe(rule):
         return f"{', '.join(WEEKDAYS[i] for i in sorted(rule['weekdays']))} from {rule['start']} to {rule['end']} (each year)"
     if k == "lookup_by_year": return "Dates listed per year: " + ", ".join(sorted(rule.get("table", {})))
     if k == "yearly_relative": return f"{rule['offset']:+d} days from: {describe(rule['base'])}"
+    if k == "easter_relative":
+        off = rule["offset"]; base = "Orthodox Easter" if rule.get("orthodox") else "Easter"
+        return f"{base}" + (f" {off:+d} days" if off else "") + (f", {rule['days']} days" if rule.get("days", 1) > 1 else "")
+    if k == "weekday_nearest": return f"{calendar.day_name[rule['weekday']]} nearest {calendar.month_name[rule['month']]} {rule['day']}"
+    if k == "hebrew":
+        names = {1: "Nisan", 2: "Iyar", 3: "Sivan", 4: "Tammuz", 5: "Av", 6: "Elul", 7: "Tishrei", 8: "Cheshvan", 9: "Kislev", 10: "Tevet", 11: "Shevat", 12: "Adar"}
+        return f"Hebrew calendar: {rule['day']} {names.get(rule['month'], rule['month'])}" + (f", {rule['days']} days" if rule.get("days", 1) > 1 else "")
+    if k == "islamic":
+        names = {1: "Muharram", 2: "Safar", 3: "Rabi' al-awwal", 4: "Rabi' al-thani", 5: "Jumada al-awwal", 6: "Jumada al-thani", 7: "Rajab",
+                 8: "Sha'ban", 9: "Ramadan", 10: "Shawwal", 11: "Dhu al-Qi'dah", 12: "Dhu al-Hijjah"}
+        return f"Islamic calendar: {rule['day']} {names.get(rule['month'], rule['month'])} (predicted, Umm al-Qura)"
     return "One time"
 
-# US federal holidays (actual dates, not observed dates)
-FEDERAL_HOLIDAYS = [
-    ("New Year's Day", {"kind": "yearly_fixed", "month": 1, "day": 1}),
-    ("Martin Luther King Jr. Day", {"kind": "yearly_nth_weekday", "month": 1, "weekday": 0, "n": 3}),
-    ("Presidents Day", {"kind": "yearly_nth_weekday", "month": 2, "weekday": 0, "n": 3}),
-    ("Memorial Day", {"kind": "yearly_nth_weekday", "month": 5, "weekday": 0, "n": -1}),
-    ("Juneteenth", {"kind": "yearly_fixed", "month": 6, "day": 19}),
-    ("Fourth of July", {"kind": "yearly_fixed", "month": 7, "day": 4}),
-    ("Labor Day", {"kind": "yearly_nth_weekday", "month": 9, "weekday": 0, "n": 1}),
-    ("Columbus / Indigenous Peoples' Day", {"kind": "yearly_nth_weekday", "month": 10, "weekday": 0, "n": 2}),
-    ("Veterans Day", {"kind": "yearly_fixed", "month": 11, "day": 11}),
-    ("Thanksgiving", {"kind": "yearly_nth_weekday", "month": 11, "weekday": 3, "n": 4}),
-    ("Christmas", {"kind": "yearly_fixed", "month": 12, "day": 25}),
-]
+# kept for older imports/tests; the sets live in holidays.py
+from .holidays import FEDERAL as FEDERAL_HOLIDAYS
+
+
+def format_dates(dates):
+    """Compact text for a sorted list of dates: 'Sep 12-13', 'Dec 26 - Jan 2', 'Apr 5'."""
+    runs = []
+    for d in sorted(dates):
+        if runs and (d - runs[-1][1]).days == 1: runs[-1][1] = d
+        else: runs.append([d, d])
+    def one(a, b):
+        if a == b: return f"{a:%b} {a.day}"
+        return f"{a:%b} {a.day}-{b.day}" if a.month == b.month else f"{a:%b} {a.day} - {b:%b} {b.day}"
+    return ", ".join(one(a, b) for a, b in runs)
