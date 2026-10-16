@@ -4,7 +4,7 @@ import streamlit as st
 from calendar_core import astro, climo, db, holidays, ical, importers, milestones, patterns, preview, recurrence, render_pdf as R
 
 st.set_page_config(page_title="Weathercast Planning Calendar", layout="wide")
-APP_VERSION = "2026-10-16a"
+APP_VERSION = "2026-10-16b"
 
 # Hosted database settings may come from Streamlit secrets; the storage layer reads the environment.
 for _k in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
@@ -316,6 +316,12 @@ with tab_set:
         added = db.load_holidays(con, chosen); snapshot()
         total = sum(added.values())
         st.success(f"Added {total} holiday(s): " + ", ".join(f"{holidays.HOLIDAY_SETS[k][0]} {n}" for k, n in added.items()) if total else "They are all already there.")
+    old = db.retired_holidays(con)
+    if old:
+        st.warning(f"{len(old)} holiday entr{'y' if len(old) == 1 else 'ies'} you added earlier {'is' if len(old) == 1 else 'are'} no longer in the holiday lists (the Jewish "
+                   "holidays are now single 'begins' markers on the evening they start): " + ", ".join(sorted(e["title"] for e in old)))
+        if st.button("Move those to the trash"):
+            n = db.retire_holidays(con); snapshot(); st.success(f"Moved {n} to the trash (you can restore them). Now add the sets you want above."); st.rerun()
     st.caption("Holidays are repeat rules, so they appear in every year automatically. They go in the Holidays category; edit or delete any of them in the Events tab. "
                "Nothing is added twice.")
     st.divider(); st.subheader(f"Prepare {year + 1}")

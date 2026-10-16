@@ -327,6 +327,17 @@ def load_holidays(con, set_keys=("federal",)):
         added[key] = n
     return added
 
+def retired_holidays(con):
+    """Events that earlier versions of the holiday sets created and that are no longer offered (title and rule both match)."""
+    from . import holidays
+    return [e for e in events(con) if e["rule"] and holidays.RETIRED.get(e["title"]) == e["rule"]]
+
+def retire_holidays(con):
+    """Move those events to the trash (restorable). Returns how many."""
+    items = retired_holidays(con)
+    for e in items: delete_event(con, e["id"])
+    return len(items)
+
 def load_federal_holidays(con):
     """Kept for compatibility: the federal set only. Returns the number added."""
     return load_holidays(con, ["federal"])["federal"]

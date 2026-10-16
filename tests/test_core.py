@@ -365,50 +365,65 @@ def _on(title, year):
 def test_easter_and_christian_holidays():
     assert [rc.easter(y) for y in (2024, 2025, 2026, 2027)] == [D(2024, 3, 31), D(2025, 4, 20), D(2026, 4, 5), D(2027, 3, 28)]
     assert [rc.easter(y, True) for y in (2024, 2025, 2026, 2027)] == [D(2024, 5, 5), D(2025, 4, 20), D(2026, 4, 12), D(2027, 5, 2)]
-    assert _on("Ash Wednesday", 2026) == [D(2026, 2, 18)] and _on("Mardi Gras", 2026) == [D(2026, 2, 17)]
-    assert _on("Palm Sunday", 2026) == [D(2026, 3, 29)] and _on("Good Friday", 2026) == [D(2026, 4, 3)]
-    assert _on("Ascension Day", 2026) == [D(2026, 5, 14)] and _on("Pentecost", 2026) == [D(2026, 5, 24)]
-    assert [_on("First Sunday of Advent", y)[0] for y in (2025, 2026, 2027)] == [D(2025, 11, 30), D(2026, 11, 29), D(2027, 11, 28)]
-    assert _on("Epiphany", 2026) == [D(2026, 1, 6)] and _on("Orthodox Christmas", 2026) == [D(2026, 1, 7)]
+    assert _on("Mardi Gras", 2026) == [D(2026, 2, 17)] and _on("Easter", 2027) == [D(2027, 3, 28)] and _on("Orthodox Easter", 2027) == [D(2027, 5, 2)]
+    assert _on("Christmas Eve", 2026) == [D(2026, 12, 24)] and _on("Christmas", 2026) == [D(2026, 12, 25)]
+    from calendar_core import holidays
+    assert [t for t, _ in holidays.CHRISTIAN] == ["Mardi Gras", "Easter", "Orthodox Easter", "Christmas Eve", "Christmas"]
+    assert rc.dates_for_rule({"kind": "weekday_nearest", "month": 11, "day": 30, "weekday": 6}, 2026) == [D(2026, 11, 29)]   # rule kind still supported
 
-def test_jewish_holidays_first_dates_and_lengths():
-    # dates as on Hebcal-style calendars: the day of the holiday (it begins at sundown the evening before)
-    assert _on("Rosh Hashanah", 2025) == [D(2025, 9, 23), D(2025, 9, 24)] and _on("Yom Kippur", 2025) == [D(2025, 10, 2)]
-    assert _on("Rosh Hashanah", 2026) == [D(2026, 9, 12), D(2026, 9, 13)] and _on("Yom Kippur", 2026) == [D(2026, 9, 21)]
-    assert _on("Sukkot", 2026)[0] == D(2026, 9, 26) and len(_on("Sukkot", 2026)) == 7
-    assert _on("Shemini Atzeret", 2026) == [D(2026, 10, 3)] and _on("Simchat Torah", 2026) == [D(2026, 10, 4)]
-    assert _on("Passover", 2025)[0] == D(2025, 4, 13) and _on("Passover", 2026)[0] == D(2026, 4, 2) and len(_on("Passover", 2026)) == 8
-    assert _on("Shavuot", 2026) == [D(2026, 5, 22), D(2026, 5, 23)] and _on("Tisha B'Av", 2026) == [D(2026, 7, 23)]
-    assert _on("Hanukkah", 2026)[0] == D(2026, 12, 5) and _on("Hanukkah", 2026)[-1] == D(2026, 12, 12)
-    assert _on("Purim", 2026) == [D(2026, 3, 3)] and _on("Purim", 2027) == [D(2027, 3, 23)] and _on("Purim", 2024) == [D(2024, 3, 24)]   # Adar II in leap years
+def test_jewish_holidays_are_single_begins_markers_on_the_evening():
+    from calendar_core import holidays
+    assert [t for t, _ in holidays.JEWISH] == ["Purim begins", "Passover begins", "Rosh Hashanah begins", "Yom Kippur begins", "Hanukkah begins"]
+    # the evening each holiday starts (the day before its first full day); exactly one date each
+    assert _on("Rosh Hashanah begins", 2025) == [D(2025, 9, 22)] and _on("Yom Kippur begins", 2025) == [D(2025, 10, 1)]
+    assert _on("Rosh Hashanah begins", 2026) == [D(2026, 9, 11)] and _on("Yom Kippur begins", 2026) == [D(2026, 9, 20)]
+    assert _on("Rosh Hashanah begins", 2027) == [D(2027, 10, 1)] and _on("Yom Kippur begins", 2027) == [D(2027, 10, 10)]
+    assert _on("Passover begins", 2025) == [D(2025, 4, 12)] and _on("Passover begins", 2026) == [D(2026, 4, 1)] and _on("Passover begins", 2027) == [D(2027, 4, 21)]
+    assert _on("Hanukkah begins", 2025) == [D(2025, 12, 14)] and _on("Hanukkah begins", 2026) == [D(2026, 12, 4)] and _on("Hanukkah begins", 2027) == [D(2027, 12, 24)]
+    assert _on("Purim begins", 2026) == [D(2026, 3, 2)] and _on("Purim begins", 2027) == [D(2027, 3, 22)] and _on("Purim begins", 2024) == [D(2024, 3, 23)]   # Adar II in leap years
 
-def test_hanukkah_crossing_the_new_year_splits_by_year():
-    assert _on("Hanukkah", 2024) == [D(2024, 12, d) for d in range(26, 32)]
-    assert _on("Hanukkah", 2025) == [D(2025, 1, 1), D(2025, 1, 2)] + [D(2025, 12, d) for d in range(15, 23)]   # tail of last year's, then this year's
+def test_hanukkah_eve_appears_exactly_once_per_gregorian_year():
+    rule = {"kind": "hebrew", "month": 9, "day": 25, "days": 1, "offset": -1}
+    assert rc.dates_for_rule(rule, 2024) == [D(2024, 12, 25)] and rc.dates_for_rule(rule, 2025) == [D(2025, 12, 14)]
+    for y in range(2020, 2060): assert len(rc.dates_for_rule(rule, y)) == 1          # exactly one Hanukkah eve per Gregorian year, none lost or doubled
 
 def test_islamic_holidays_predicted_and_safe_outside_range():
     assert _on("Ramadan begins", 2025) == [D(2025, 3, 1)] and _on("Eid al-Fitr", 2025) == [D(2025, 3, 30)] and _on("Eid al-Adha", 2025) == [D(2025, 6, 6)]
     assert _on("Ramadan begins", 2026) == [D(2026, 2, 18)] and _on("Eid al-Fitr", 2026) == [D(2026, 3, 20)]
-    assert _on("Day of Arafah", 2026) == [D(2026, 5, 26)] and _on("Eid al-Adha", 2026) == [D(2026, 5, 27)] and _on("Islamic New Year", 2026) == [D(2026, 6, 16)]
-    assert _on("Islamic New Year", 2025) == [D(2025, 6, 26)] and _on("Ashura", 2025) == [D(2025, 7, 5)]
-    assert len(_on("Islamic New Year", 2041)) == 2          # the lunar year is ~11 days short: the date can occur twice in a Gregorian year
-    assert _on("Islamic New Year", 2100) == [] and _on("Islamic New Year", 1900) == []     # outside the calendar's supported range: no crash
+    assert _on("Eid al-Adha", 2026) == [D(2026, 5, 27)] and _on("Ramadan begins", 2027) == [D(2027, 2, 8)] and _on("Eid al-Fitr", 2027) == [D(2027, 3, 9)]
+    new_year = {"kind": "islamic", "month": 1, "day": 1}
+    assert rc.dates_for_rule(new_year, 2026) == [D(2026, 6, 16)] and len(rc.dates_for_rule(new_year, 2041)) == 2   # the lunar year is ~11 days short: a date can occur twice in a year
+    assert _on("Eid al-Fitr", 2100) == [] and _on("Eid al-Fitr", 1900) == []     # outside the calendar's supported range: no crash
 
 def test_load_holiday_sets_dedupes_flags_and_round_trips(con, tmp_path):
-    from calendar_core import holidays
-    first = db.load_holidays(con, ["federal", "christian"]); assert first == {"federal": 11, "christian": 13}      # Christmas only once
+    first = db.load_holidays(con, ["federal", "christian"]); assert first == {"federal": 11, "christian": 4}      # Christmas only once
     assert db.load_holidays(con, ["federal", "christian"]) == {"federal": 0, "christian": 0}
-    assert db.load_holidays(con, ["jewish", "muslim", "popular"]) == {"jewish": 10, "muslim": 8, "popular": 7}
+    assert db.load_holidays(con, ["jewish", "muslim", "popular"]) == {"jewish": 5, "muslim": 3, "popular": 7}
     evs = {e["title"]: e for e in db.events(con)}
-    assert len(evs) == 49 and sum(1 for e in db.events(con) if e["title"] == "Christmas") == 1
-    assert evs["Eid al-Fitr"]["flag"] == "predicted date: confirm" and evs["Easter"]["flag"] is None and evs["Hanukkah"]["flag"] is None
+    assert len(evs) == 30 and sum(1 for e in db.events(con) if e["title"] == "Christmas") == 1
+    assert evs["Eid al-Fitr"]["flag"] == "predicted date: confirm" and evs["Easter"]["flag"] is None and evs["Hanukkah begins"]["flag"] is None
     assert {e["title"] for e in db.events_on_day(con, D(2027, 3, 28))} == {"Easter"}
-    assert "Hanukkah" in {e["title"] for e in db.events_on_day(con, D(2026, 12, 9))}
+    assert {e["title"] for e in db.events_on_day(con, D(2026, 12, 4))} == {"Hanukkah begins"}
+    assert not {e["title"] for e in db.events_on_day(con, D(2026, 12, 9))}                 # a marker, not a week-long bar
     for e in evs.values(): assert recurrence_describe(e["rule"])                    # every rule can be described for the editor
-    c2 = db.connect(str(tmp_path / "copy.db")); assert importers.import_csv(c2, importers.export_csv(con)) == 49          # rules survive CSV export/import
-    assert {e["title"] for e in db.events_on_day(c2, D(2026, 9, 21))} == {"Yom Kippur"}
+    c2 = db.connect(str(tmp_path / "copy.db")); assert importers.import_csv(c2, importers.export_csv(con)) == 30          # rules survive CSV export/import
+    assert {e["title"] for e in db.events_on_day(c2, D(2026, 9, 20))} == {"Yom Kippur begins"}
     i = evs["Easter"]["id"]; db.update_event(con, i, rule=None); db.undo_last(con)                                    # undo restores a calculated rule
     assert db.get_event(con, i)["rule"]["kind"] == "easter_relative"
+
+def test_retired_holiday_entries_can_be_moved_to_the_trash(con):
+    from calendar_core import holidays
+    for t, r in holidays.RETIRED.items(): db.add_event(con, t, "2026-01-01", None, rule=r)               # everything an earlier version created
+    db.add_event(con, "Pentecost", "2026-05-24", None, rule={"kind": "yearly_fixed", "month": 5, "day": 24})   # a person's own rule with the same title: kept
+    db.add_event(con, "Pentecost Sunday picnic", "2026-05-24")                       # a person's own event with a similar name: kept
+    db.add_event(con, "Hanukkah", "2026-12-05", "2026-12-12")                        # a one-off the user typed (no rule): kept
+    db.load_holidays(con, ["christian", "jewish", "muslim"])
+    assert len(db.retired_holidays(con)) == len(holidays.RETIRED) == 24
+    assert db.retire_holidays(con) == 24
+    titles = [e["title"] for e in db.events(con)]
+    assert titles.count("Pentecost") == 1 and "Pentecost Sunday picnic" in titles and titles.count("Hanukkah") == 1       # only the user's own ones remain
+    assert "Hanukkah begins" in titles and "Easter" in titles and "Epiphany" not in titles and "Rosh Hashanah" not in titles
+    assert len(db.events(con, only_deleted=True)) == 24 and db.retired_holidays(con) == []
 
 def recurrence_describe(rule): return rc.describe(rule)
 
@@ -420,5 +435,6 @@ def test_holiday_months_render_without_dropping_events(con):
         assert _pages(pdf) >= 1 and all(o["hidden"] < 6 for o in rep["overflow"])
 
 def test_format_dates_compact():
-    assert rc.format_dates(_on("Hanukkah", 2026)) == "Dec 5-12" and rc.format_dates(_on("Rosh Hashanah", 2026)) == "Sep 12-13"
+    span = {"kind": "hebrew", "month": 9, "day": 25, "days": 8}; two = {"kind": "hebrew", "month": 7, "day": 1, "days": 2}
+    assert rc.format_dates(rc.dates_for_rule(span, 2026)) == "Dec 5-12" and rc.format_dates(rc.dates_for_rule(two, 2026)) == "Sep 12-13"
     assert rc.format_dates([D(2026, 12, 30), D(2026, 12, 31), D(2027, 1, 1)]) == "Dec 30 - Jan 1" and rc.format_dates([D(2026, 4, 5)]) == "Apr 5"

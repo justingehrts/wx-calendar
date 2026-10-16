@@ -36,13 +36,15 @@ def _span(start, days, year):
     return [d for d in (start + dt.timedelta(days=i) for i in range(days)) if d.year == year]
 
 def hebrew_dates(rule, year):
-    """Gregorian dates in `year` for a Hebrew-calendar holiday: {month, day, days, late_adar}. Nisan=1 ... Elul=6, Tishrei=7 ... Adar=12
-    (Adar II = 13 in leap years when late_adar is set). Holidays begin at sundown the evening before the first date."""
+    """Gregorian dates in `year` for a Hebrew-calendar holiday: {month, day, days, late_adar, offset}. Nisan=1 ... Elul=6, Tishrei=7 ...
+    Adar=12 (Adar II = 13 in leap years when late_adar is set). Holidays begin at sundown the evening before the first full day, so
+    offset=-1 puts the date on that evening."""
     from pyluach import dates, hebrewcal
     out = set()
     for hy in (year + 3760, year + 3761):
         month = 13 if rule.get("late_adar") and rule["month"] == 12 and hebrewcal.Year(hy).leap else rule["month"]
-        out.update(_span(dates.HebrewDate(hy, month, rule["day"]).to_pydate(), rule.get("days", 1), year))
+        first_day = dates.HebrewDate(hy, month, rule["day"]).to_pydate()
+        out.update(_span(first_day + dt.timedelta(days=rule.get("offset", 0)), rule.get("days", 1), year))
     return sorted(out)
 
 def islamic_dates(rule, year):
@@ -127,7 +129,9 @@ def describe(rule):
     if k == "weekday_nearest": return f"{calendar.day_name[rule['weekday']]} nearest {calendar.month_name[rule['month']]} {rule['day']}"
     if k == "hebrew":
         names = {1: "Nisan", 2: "Iyar", 3: "Sivan", 4: "Tammuz", 5: "Av", 6: "Elul", 7: "Tishrei", 8: "Cheshvan", 9: "Kislev", 10: "Tevet", 11: "Shevat", 12: "Adar"}
-        return f"Hebrew calendar: {rule['day']} {names.get(rule['month'], rule['month'])}" + (f", {rule['days']} days" if rule.get("days", 1) > 1 else "")
+        what = f"{rule['day']} {names.get(rule['month'], rule['month'])}"
+        if rule.get("offset") == -1: return f"Hebrew calendar: the evening it begins (sundown before {what})"
+        return f"Hebrew calendar: {what}" + (f", {rule['days']} days" if rule.get("days", 1) > 1 else "")
     if k == "islamic":
         names = {1: "Muharram", 2: "Safar", 3: "Rabi' al-awwal", 4: "Rabi' al-thani", 5: "Jumada al-awwal", 6: "Jumada al-thani", 7: "Rajab",
                  8: "Sha'ban", 9: "Ramadan", 10: "Shawwal", 11: "Dhu al-Qi'dah", 12: "Dhu al-Hijjah"}
