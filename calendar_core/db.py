@@ -1,6 +1,6 @@
 """SQLite storage (WAL mode). All data access goes through this module so the backend can be
 swapped later if hosting requires it."""
-import datetime as dt, json, os, sqlite3, tempfile
+import datetime as dt, json, os, re, sqlite3, tempfile
 from . import recurrence
 
 DB_PATH = os.environ.get("CALENDAR_DB", os.path.join(os.path.dirname(__file__), "..", "data", "calendar.db"))
@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS history(
 CREATE TABLE IF NOT EXISTS milestone_decisions(
   key TEXT PRIMARY KEY, status TEXT NOT NULL, decided_at TEXT NOT NULL, event_id INTEGER);
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS regional_candidates(
+  id INTEGER PRIMARY KEY, source TEXT NOT NULL, uid TEXT NOT NULL, title TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
+  city TEXT, county TEXT, url TEXT, fetched_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'new', event_id INTEGER, UNIQUE(source, uid));
 CREATE TABLE IF NOT EXISTS cache_files(name TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
 """
 EDITABLE = ["title", "start_date", "end_date", "category_id", "time", "location", "notes", "url", "detail_only", "flag"]
@@ -411,3 +414,34 @@ def diagnose(con):
             for r in rows[:3]: out.append("   " + repr(r)[:300])
         except Exception as ex: out.append(f"{label}: ERROR {type(ex).__name__}: {ex}")
     return "\n".join(out)
+
+
+# ------------------------------------------------------------ regional event candidates
+CAND_COLS = ["id", "source", "uid", "title", "start_date", "end_date", "city", "county", "url", "fetched_at", "status", "event_id"]
+
+def upsert_candidate(con, source, uid, title, start, end, city, county, url):
+    """Insert a candidate, or refresh the details of one still awaiting review. Accepted/rejected ones are left alone (a rejected one never
+    returns). Returns 1 if it was new, else 0."""
+    row = _tuples(con, "SELECT id, status FROM regional_candidates WHERE source=? AND uid=?", (source, uid))
+    if row:
+        if row[0][1] == "new":
+            con.execute("UPDATE regional_candidates SET title=?, start_date=?, end_date=?, city=?, county=?, url=?, fetched_at=? WHERE id=?",
+                        (title, str(start), str(end), city, county, url, now(), row[0][0])); con.commit()
+        return 0
+    con.execute("INSERT INTO regional_candidates(source,uid,title,start_date,end_date,city,county,url,fetched_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                (source, uid, title, str(start), str(end), city, county, url, now())); con.commit(); return 1
+
+def candidates(con, status="new"):
+    return _named(con, "SELECT " + ",".join(CAND_COLS) + " FROM regional_candidates WHERE status=? ORDER BY start_date, title", (status,), CAND_COLS)
+
+def get_candidate(con, cand_id):
+    rows = _named(con, "SELECT " + ",".join(CAND_COLS) + " FROM regional_candidates WHERE id=?", (cand_id,), CAND_COLS)
+    return rows[0] if rows else None
+
+def decide_candidate(con, cand_id, status, event_id=None):
+    con.execute("UPDATE regional_candidates SET status=?, event_id=? WHERE id=?", (status, event_id, cand_id)); con.commit()
+
+def likely_duplicates(con, cand):
+    """Existing calendar events with the same title (ignoring case/punctuation) overlapping the candidate's dates."""
+    norm = lambda s: re.sub(r"[^a-z0-9]+", "", s.lower())
+    return [e for e in events(con) if norm(e["title"]) == norm(cand["title"]) and e["start_date"] <= cand["end_date"] and (e["end_date"] or e["start_date"]) >= cand["start_date"]]

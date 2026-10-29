@@ -1,10 +1,10 @@
 import datetime as dt, json, os, hmac
 import pandas as pd
 import streamlit as st
-from calendar_core import astro, climo, db, holidays, ical, importers, meteors, milestones, patterns, preview, recurrence, render_pdf as R
+from calendar_core import astro, climo, db, holidays, ical, importers, meteors, milestones, patterns, preview, recurrence, regional, render_pdf as R
 
 st.set_page_config(page_title="Weathercast Planning Calendar", layout="wide")
-APP_VERSION = "2026-10-29b"
+APP_VERSION = "2026-10-30a"
 
 # Hosted database settings may come from Streamlit secrets; the storage layer reads the environment.
 for _k in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
@@ -75,7 +75,7 @@ with st.sidebar:
     st.caption(f"App version {APP_VERSION}  |  storage: {'hosted database' if db.turso_config() else 'local file'}")
     st.caption("Sunrise/sunset: NOAA solar-calculator algorithm, truncated to the minute like the NWS climate report; moon: PyEphem; normals (1991-2020) and records: RCC-ACIS, Columbus Area (threaded record, CMHthr).")
 
-tab_events, tab_cats, tab_ms, tab_hist, tab_set = st.tabs(["Events", "Categories", "Milestones", "History & trash", "Settings"])
+tab_events, tab_cats, tab_ms, tab_reg, tab_hist, tab_set = st.tabs(["Events", "Categories", "Milestones", "Regional events", "History & trash", "Settings"])
 
 # -------------------------------------------------------------------- events
 def snapshot():
@@ -269,6 +269,54 @@ with tab_ms:
         with st.expander(f"{len(flagged)} imported event(s) that could be auto-generated"):
             st.dataframe(pd.DataFrame([{"date": e["start_date"], "title": e["title"]} for e in flagged]), hide_index=True)
             st.caption("These typed entries are things the app can now calculate. Compare with the proposals above, then delete the typed versions you don't need.")
+
+# ----------------------------------------------------------------- regional events
+with tab_reg:
+    st.caption("Outdoor festivals and fairs across the Columbus and Zanesville markets. Sources only *propose* events; nothing reaches the calendar until you accept it, "
+               "and a rejected one never comes back. Accepted events are tagged with their county and a 'confirm dates' note.")
+    saved = db.get_setting(con, "market_counties", regional.MARKET_COUNTIES)
+    counties = st.multiselect("Counties to include", regional.MARKET_COUNTIES, [c for c in saved if c in regional.MARKET_COUNTIES])
+    if counties != saved: db.set_setting(con, "market_counties", counties)
+    with st.expander("Sources"):
+        st.markdown("**Experience Columbus** (public event pages; the site has no calendar feed, so pages are read politely: 2 seconds apart, as its robots.txt asks, and cached).")
+        kws = st.text_input("Festival-like words in the event's web address", ", ".join(db.get_setting(con, "ec_keywords", regional.DEFAULT_KEYWORDS)))
+        exs = st.text_input("Skip addresses containing", ", ".join(db.get_setting(con, "ec_exclude", regional.DEFAULT_EXCLUDE)))
+        split = lambda s: [x.strip().lower() for x in s.split(",") if x.strip()]
+        if st.button("Fetch upcoming events from Experience Columbus"):
+            db.set_setting(con, "ec_keywords", split(kws)); db.set_setting(con, "ec_exclude", split(exs)); bar = st.progress(0.0, "Reading event pages…")
+            try:
+                r = regional.fetch_experience_columbus(counties, split(kws), split(exs), progress=lambda i, n: bar.progress(i / max(n, 1), f"Read {i} of {n} pages"), max_pages=60)
+                st.success(f"{r['new']} new proposal(s); {r['seen']} upcoming event(s) in your counties" + (f"; {r['outside']} in other counties skipped" if r["outside"] else "") + "."
+                           + (f" {r['remaining']} more pages are left: press the button again to continue." if r["remaining"] else ""))
+            except Exception as ex: st.error(f"Could not read Experience Columbus: {ex}")
+        st.markdown("**Calendar feeds (.ics)** from any visitors bureau or fairground that offers one.")
+        feeds = db.get_setting(con, "ics_feeds", [])
+        for i, fd in enumerate(feeds):
+            f1, f2 = st.columns([5, 1]); f1.write(f"{fd['name']} · {fd.get('county') or 'any county'} · {fd['url']}")
+            if f2.button("Remove", key=f"rmfeed{i}"): feeds.pop(i); db.set_setting(con, "ics_feeds", feeds); st.rerun()
+        with st.form("addfeed"):
+            n1, n2, n3 = st.columns([2, 1, 3]); fn = n1.text_input("Name"); fc = n2.selectbox("County", [""] + regional.MARKET_COUNTIES); fu = n3.text_input("Feed address (https://… .ics)")
+            if st.form_submit_button("Add feed") and fn.strip() and fu.strip().startswith("http"):
+                feeds.append({"name": fn.strip(), "county": fc or None, "url": fu.strip()}); db.set_setting(con, "ics_feeds", feeds); st.rerun()
+        if feeds and st.button("Fetch all calendar feeds"):
+            for i, fd in enumerate(feeds):
+                try: r = regional.fetch_ics(f"ics:{fd['url']}", fd["url"], fd.get("county")); st.write(f"{fd['name']}: {r['new']} new of {r['seen']} upcoming")
+                except Exception as ex: st.error(f"{fd['name']}: {ex}")
+        st.caption("Planned: the Ohio Department of Agriculture's official county-fair schedule and county visitors-bureau calendars, once the app can reach them.")
+    cands = [c for c in db.candidates(con, "new") if (c["county"] in counties or not c["county"])]
+    if not cands: st.info("Nothing waiting for review. Use Sources above to fetch events.")
+    else:
+        cdf = pd.DataFrame([{"decision": "", "dates": f"{recurrence.format_dates([dt.date.fromisoformat(c['start_date']) + dt.timedelta(days=i) for i in range((dt.date.fromisoformat(c['end_date']) - dt.date.fromisoformat(c['start_date'])).days + 1)])}"
+                             f" {c['start_date'][:4]}", "title": c["title"], "county": c["county"], "city": c["city"],
+                             "already on calendar": "yes" if db.likely_duplicates(con, c) else "", "link": c["url"]} for c in cands])
+        ced = st.data_editor(cdf, hide_index=True, width="stretch", key=f"reg{len(cands)}", disabled=["dates", "title", "county", "city", "already on calendar", "link"],
+                             column_config={"decision": st.column_config.SelectboxColumn(options=["", "Accept", "Reject"]), "link": st.column_config.LinkColumn(display_text="open")})
+        if st.button("Apply decisions", type="primary", key="reg_apply"):
+            n = 0
+            for i, r in ced.iterrows():
+                if r["decision"] == "Accept": regional.accept(con, cands[i]["id"]); n += 1
+                elif r["decision"] == "Reject": db.decide_candidate(con, cands[i]["id"], "rejected"); n += 1
+            snapshot(); st.session_state["msg"] = ("success", f"Applied {n} decision(s)"); st.rerun()
 
 # ---------------------------------------------------------- history & trash
 with tab_hist:

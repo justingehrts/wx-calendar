@@ -8,3 +8,4 @@ pillow
 libsql
 pyluach
 hijridate
+zipcodes

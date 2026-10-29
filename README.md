@@ -98,6 +98,18 @@ This path is also untested (no Docker daemon in the authoring environment).
 - **Meteor showers**: `reference/meteor_showers.json` has *typical* peak dates. Add verified dates for a year under `"years"`
   (from the IMO or AMS calendar); until then the proposals say "typical date, not verified".
 
+## Regional festivals and fairs (Regional events tab)
+For outdoor festivals and fairs across the 22 counties in the Columbus and Zanesville markets. Sources only **propose** events; you accept or reject
+each one, a rejected one never returns, and accepted ones go in a "Regional festivals & fairs" category (its own black-and-white style) tagged with the
+county and a "confirm dates" note. Counties come from the event's ZIP code (a ZIP that straddles counties gets its primary county).
+
+- **Experience Columbus**: the site has no calendar feed or open API (its data service refuses direct requests, which we respect), so the app reads its
+  public event pages: it finds them through the sitemap, keeps festival-like addresses (editable word lists), reads each page's title line
+  (name, dates, city and ZIP), waits 2 seconds between pages as the site's robots.txt asks, caches what it reads, and fetches in batches of 60.
+- **Calendar (.ics) feeds**: add any visitors bureau or fairground feed in Sources. All-day events are handled correctly (the end date in a feed is exclusive).
+- **Planned**: the Ohio Department of Agriculture's official county-fair schedule and county visitors-bureau calendars, which need network access to
+  those sites (see the notes on allowed domains).
+
 ## Layout
     app.py                  Streamlit UI + passcode gate
     calendar_core/          db, recurrence, astro, climo, milestones, render_pdf, patterns, importers, ical, preview

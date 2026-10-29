@@ -541,3 +541,107 @@ def test_accepting_a_meteor_peak_makes_a_two_night_bar_and_old_entries_are_flagg
     assert db.retire_outdated_climo_milestones(con) == 1
     assert "meteor:orionids:2026" in {m["key"] for m in milestones.pending(con, 2026)} and "meteor:geminids:2026" not in {m["key"] for m in milestones.pending(con, 2026)}
     pdf, rep = R.render(db.events(con), db.categories(con), 2026, [12], R.Options(details_page=False)); assert _pages(pdf) == 1
+
+
+# ------------------------------------------------------------------- regional events
+def test_experience_columbus_title_parsing_and_county_lookup():
+    from calendar_core import regional as rg
+    p = rg.parse_ec_title("Circleville Pumpkin Show | 10/21/26 - 10/24/26 | Circleville, OH 43113")
+    assert (p["title"], p["start"], p["end"], p["city"], p["zip"]) == ("Circleville Pumpkin Show", "2026-10-21", "2026-10-24", "Circleville", "43113")
+    one = rg.parse_ec_title("Autumn Fest at North Market Bridge Park | 11/14/26 | Dublin, OH 43017"); assert one["start"] == one["end"] == "2026-11-14"
+    assert rg.parse_ec_title("Beers &amp; Bluegrass | 7/9/27 | Columbus, OH 43215")["title"] == "Beers & Bluegrass"
+    assert rg.parse_ec_title("Some page without dates") is None and rg.parse_ec_title("X | 13/45/26 | Y, OH 43215") is None      # unreadable pages are skipped, never crash
+    assert rg.county_for_zip("43113") == "Pickaway" and rg.county_for_zip("43023") == "Licking" and rg.county_for_zip("43701") == "Muskingum"
+    assert rg.county_for_zip("10001") is None and rg.county_for_zip("not a zip") is None            # outside Ohio or invalid
+    assert len(rg.MARKET_COUNTIES) == 22 and "Zanesville" not in rg.MARKET_COUNTIES
+
+def test_experience_columbus_slug_filter():
+    from calendar_core import regional as rg
+    sm = "".join(f"<url><loc>https://www.experiencecolumbus.com/event/{s}/1/</loc></url>" for s in
+                 ("dublin-irish-festival", "blown-pumpkin-classes", "columbus-arts-festival", "trivia-night", "harvest-fair-yoga", "pickaway-county-fair", "jazz-trio"))
+    sm += "<url><loc>https://www.experiencecolumbus.com/restaurants/festival-grill/</loc></url>"
+    got = [u.split("/event/")[1].split("/")[0] for u in rg.ec_event_urls(sm, rg.DEFAULT_KEYWORDS, rg.DEFAULT_EXCLUDE)]
+    assert got == ["dublin-irish-festival", "columbus-arts-festival", "pickaway-county-fair"]      # no non-event pages, no classes/yoga/trivia
+
+def _fake_ec(pages):
+    sm = "".join(f"<loc>{u}</loc>" for u in pages)
+    return lambda url: sm if url.endswith("/sitemap.xml") else f"<html><head><title>{pages[url]}</title></head></html>"
+
+def test_experience_columbus_fetch_is_polite_cached_filtered_and_idempotent(con, tmp_path, monkeypatch):
+    from calendar_core import regional as rg, paths, store
+    monkeypatch.setattr(paths, "CACHE", str(tmp_path / "cache")); store._mem.clear(); monkeypatch.setattr(rg.db, "connect", lambda *a, **k: con)
+    B = "https://www.experiencecolumbus.com/event/"
+    pages = {B + "pumpkin-show/1/": "Circleville Pumpkin Show | 10/21/27 - 10/24/27 | Circleville, OH 43113",         # Pickaway: kept
+             B + "irish-festival/2/": "Dublin Irish Festival | 8/6/27 - 8/8/27 | Dublin, OH 43017",                      # Franklin: kept
+             B + "toledo-festival/3/": "Toledo Festival | 5/1/27 | Toledo, OH 43604",                                    # Lucas County: outside the market
+             B + "old-fair/4/": "Old Fair | 8/1/26 | Columbus, OH 43215",                                                 # already over: skipped
+             B + "weird-fest/5/": "Weird Fest page with no dates in the title"}                                          # unreadable: cached, ignored
+    sleeps, today = [], dt.date(2026, 10, 30)
+    r = rg.fetch_experience_columbus(today=today, get=_fake_ec(pages), sleep=sleeps.append)
+    assert (r["new"], r["seen"], r["outside"], r["pages_read"], r["remaining"]) == (2, 2, 1, 5, 0) and sleeps == [2.0] * 5          # 2-second crawl delay before each page
+    assert sorted(c["title"] for c in db.candidates(con)) == ["Circleville Pumpkin Show", "Dublin Irish Festival"]
+    assert {c["title"]: c["county"] for c in db.candidates(con)}["Circleville Pumpkin Show"] == "Pickaway"
+    sleeps.clear(); r2 = rg.fetch_experience_columbus(today=today, get=_fake_ec(pages), sleep=sleeps.append)
+    assert (r2["new"], r2["pages_read"]) == (0, 0) and sleeps == [] and len(db.candidates(con)) == 2                             # cached; no duplicates
+    r3 = rg.fetch_experience_columbus(["Pickaway"], today=today, get=_fake_ec(pages), sleep=sleeps.append); assert r3["seen"] == 1 and r3["outside"] == 2
+    store._mem.clear(); sleeps.clear(); pages2 = {**pages}; pages2[B + "page-six/6/"] = "Fair Six | 9/1/27 | Zanesville, OH 43701"; pages2[B + "page-seven/7/"] = "Fair Seven | 9/2/27 | Zanesville, OH 43701"
+    r4 = rg.fetch_experience_columbus(today=today, get=_fake_ec({k: v for k, v in pages2.items() if "page-" not in k} | {B + "fair-six/6/": pages2[B + "page-six/6/"], B + "fair-seven/7/": pages2[B + "page-seven/7/"]}),
+                                      sleep=sleeps.append, max_pages=1)
+    assert r4["pages_read"] == 1 and r4["remaining"] == 1                                                                         # resumable in batches
+
+_ICS = """BEGIN:VCALENDAR\r
+VERSION:2.0\r
+BEGIN:VEVENT\r
+UID:abc-1@example.org\r
+SUMMARY:Pickaway County Fair\r
+DTSTART;VALUE=DATE:20270619\r
+DTEND;VALUE=DATE:20270627\r
+LOCATION:Pickaway County Fairgrounds\\, Circleville\\, OH\r
+URL:https://example.org/fair\r
+END:VEVENT\r
+BEGIN:VEVENT\r
+UID:abc-2@example.org\r
+SUMMARY:Sweet Corn Festival with a very long title that is\r
+  folded across two lines\r
+DTSTART:20270814T100000\r
+DTEND:20270814T200000\r
+END:VEVENT\r
+BEGIN:VEVENT\r
+UID:abc-3@example.org\r
+SUMMARY:Last year's parade\r
+DTSTART;VALUE=DATE:20250704\r
+END:VEVENT\r
+BEGIN:VEVENT\r
+SUMMARY:No start date\r
+END:VEVENT\r
+END:VCALENDAR\r
+"""
+
+def test_ics_parsing_and_fetch(con, monkeypatch):
+    from calendar_core import regional as rg
+    ev = {e["uid"]: e for e in rg.parse_ics(_ICS)}
+    assert len(ev) == 3 and "No start date" not in [e["title"] for e in ev.values()]
+    f = ev["abc-1@example.org"]; assert (f["start"], f["end"]) == ("2027-06-19", "2027-06-26")                           # all-day DTEND is exclusive
+    assert f["location"] == "Pickaway County Fairgrounds, Circleville, OH" and f["url"] == "https://example.org/fair"
+    s = ev["abc-2@example.org"]; assert s["title"] == "Sweet Corn Festival with a very long title that is folded across two lines" and s["start"] == s["end"] == "2027-08-14"
+    monkeypatch.setattr(rg.db, "connect", lambda *a, **k: con)
+    r = rg.fetch_ics("ics:test", "https://example.org/feed.ics", "Pickaway", today=dt.date(2026, 10, 30), get=lambda u: _ICS)
+    assert r == {"new": 2, "seen": 2}                                                                                    # the 2025 parade is already over
+    assert {(c["title"][:12], c["county"], c["city"]) for c in db.candidates(con)} == {("Pickaway Cou", "Pickaway", "Circleville"), ("Sweet Corn F", "Pickaway", "")}
+    assert rg.fetch_ics("ics:test", "https://example.org/feed.ics", "Pickaway", today=dt.date(2026, 10, 30), get=lambda u: _ICS)["new"] == 0
+
+def test_candidates_are_reviewed_never_return_after_reject_and_accept_makes_a_regional_event(con, monkeypatch):
+    from calendar_core import regional as rg
+    a = db.upsert_candidate(con, "s", "1", "Utica Ice Cream Festival", "2027-05-29", "2027-05-31", "Utica", "Licking", "https://example.org/u")
+    b = db.upsert_candidate(con, "s", "2", "Bad Fest", "2027-06-01", "2027-06-01", "X", "Knox", "https://example.org/b")
+    assert (a, b) == (1, 1) and db.upsert_candidate(con, "s", "1", "Utica Ice Cream Festival (updated)", "2027-05-28", "2027-05-31", "Utica", "Licking", "https://example.org/u") == 0
+    c1 = [c for c in db.candidates(con) if c["uid"] == "1"][0]; assert c1["title"].endswith("(updated)") and c1["start_date"] == "2027-05-28"       # still new: refreshed
+    eid = rg.accept(con, c1["id"]); e = db.get_event(con, eid)
+    assert (e["title"], e["start_date"], e["end_date"], e["category"], e["location"], e["flag"]) == ("Utica Ice Cream Festival (updated)", "2027-05-28", "2027-05-31", rg.CATEGORY, "Utica, OH", "confirm dates")
+    assert "Licking County" in e["notes"] and "Confirm dates" in e["notes"] and e["url"] == "https://example.org/u"
+    c2 = [c for c in db.candidates(con) if c["uid"] == "2"][0]; db.decide_candidate(con, c2["id"], "rejected")
+    assert db.upsert_candidate(con, "s", "2", "Bad Fest renamed", "2027-06-02", "2027-06-02", "X", "Knox", "u") == 0 and db.candidates(con) == []        # a rejected one never returns
+    assert [c["title"] for c in db.candidates(con, "rejected")] == ["Bad Fest"]
+    assert patterns.style_collisions(db.categories(con)) == []                                                             # the new category gets its own B&W style
+    dup = {"title": "UTICA ice cream festival (updated)", "start_date": "2027-05-30", "end_date": "2027-05-30"}; assert [x["id"] for x in db.likely_duplicates(con, dup)] == [eid]
+    pdf, _ = R.render(db.events(con), db.categories(con), 2027, [5], R.Options(bw=True, details_page=False)); assert _pages(pdf) == 1
