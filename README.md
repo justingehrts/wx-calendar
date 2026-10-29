@@ -71,7 +71,7 @@ This path is also untested (no Docker daemon in the authoring environment).
   alone, whose records differ), with every tied year kept. Record values match the NWS on all days checked; a few tied-year lists differ
   (ours sometimes has one extra early year). Stored by month-day in `reference/climo_CMHthr_md_v2.csv`; records set after that file was made
   appear after Settings > Refresh.
-- **Climo milestones**: computed from CMHthr daily data (`reference/climo_CMHthr_stats_v2.json`). Averages are mean dates over 1991-2020; earliest/latest use the whole record (1878 on), counting only years with at least 95% data coverage of the relevant window. Thresholds: last/first
+- **Climo milestones**: computed from CMHthr daily data (`reference/climo_CMHthr_stats_v2.json`). Averages are mean dates over the 30 years 1991-2020 (the same first/last pairing as xmACIS: first snow after Jul 1 of each year, last snow before Jul 1; the fraction of a day is dropped, so a mean of Nov 23.8 prints as Nov 23; checked against xmACIS's measurable-snow table, all 60 dates and the means); earliest/latest use the whole record (1878 on), counting only years with at least 95% data coverage of the relevant window. Thresholds: last/first
   32° freeze (min temp), first/last 80° and 90° day (max temp), first/last measurable (≥0.1") and ≥1" snowfall (seasons Jul 1-Jun 30).
 - **Holidays** (Settings > Holidays; every item is a repeat rule, so dates are calculated for any year and nothing is retyped at rollover):
   U.S. federal (actual dates, not "observed" days); Christian (Mardi Gras, Easter, Orthodox Easter, Christmas Eve, Christmas; Easter from the

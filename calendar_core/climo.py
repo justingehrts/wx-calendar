@@ -7,7 +7,7 @@ from . import store
 
 STATION = "CMHthr"   # "Columbus Area" threaded record (what NWS climate pages use); plain "CMH" is the airport alone
 MD_FILE = f"climo_{STATION}_md_v2.csv"   # v2: normals from NCEI tenths (rounded half-up like the NWS), records with all tied years
-STATS_FILE = f"climo_{STATION}_stats_v2.json"   # v2: adds whole-record extremes; old cached copies are ignored
+STATS_FILE = f"climo_{STATION}_stats_v3.json"   # v3: 30 first/last pairs like xmACIS, truncated means; older cached copies are ignored
 ACIS = "https://data.rcc-acis.org/StnData"
 NORMALS_YEARS = (1991, 2020)
 
@@ -135,16 +135,20 @@ def fetch_stats():
     rows = _post({"sid": STATION, "sdate": "por", "edate": dt.date.today().isoformat(), "elems": ["maxt", "mint", "snow"]}, 300)["data"]
     D = [(dt.date.fromisoformat(r[0]), _num(r[1]), _num(r[2]), _num(r[3])) for r in rows]
     norm = [t for t in D if y0 <= t[0].year <= y1]
-    out = compute_series(norm, y0, y1, False)
-    for k in list(out):                            # snow seasons must lie fully inside the normals period
-        if "snow" in k: out[k] = {y: v for y, v in out[k].items() if y0 <= int(y) <= y1 - 1}
+    # xmACIS convention: 30 rows, 1991..2020. "First" = first snow after Jul 1 of that year (may fall in the next January); "Last" = last
+    # snow before Jul 1 of that year. So first-snow seasons start y0..y1 and last-snow springs are y0..y1 (seasons y0-1..y1-1), which is why
+    # we compute seasons y0-1..y1 and keep the right years of each series.
+    out = compute_series(norm, y0 - 1, y1, False)
+    for k in list(out):
+        lo, hi = (y0 - 1, y1 - 1) if k.startswith("last_snow") else (y0, y1)
+        out[k] = {y: v for y, v in out[k].items() if lo <= int(y) <= hi}
     rec = compute_series(D, D[0][0].year, dt.date.today().year, True, extras=False)
     out["record"] = rec
     out["_meta"] = {"station": STATION, "period": [y0, y1], "fetched": dt.date.today().isoformat(),
                     "record_start": D[0][0].isoformat(), "record_end": D[-1][0].isoformat(),
                     "thresholds": {"freeze": "min temp <= 32F", "hot90": "max temp >= 90F", "hot80": "max temp >= 80F",
                                    "snow_meas": "snowfall >= 0.1 in", "snow_1in": "snowfall >= 1.0 in"},
-                    "note": "Averages are mean dates over 1991-2020 (snow: 29 full seasons Jul 1-Jun 30). Earliest/latest use the full record, "
+                    "note": "Averages are mean dates over 1991-2020 (30 years, fraction of a day dropped, as xmACIS prints them). Earliest/latest use the full record, "
                             "only in years with >=95% data coverage of the relevant window. Trace counts as 0; missing days ignored."}
     store.write(STATS_FILE, json.dumps(out, indent=1))
     return out
@@ -175,7 +179,8 @@ def summary(key, target_year, st=None):
     None if no data."""
     st = st or stats(); series = st.get(key)
     if not series: return None
-    mean = place(key, target_year, round(statistics.mean(o for o, _ in _offsets(key, series))))
+    offs_all = [o for o, _ in _offsets(key, series)]
+    mean = place(key, target_year, sum(offs_all) // len(offs_all))       # the mean date drops the fraction of a day (as xmACIS prints it)
     rec = st.get("record", {}).get(key) or series
     offs = _offsets(key, rec); years = sorted(int(y) for y in rec)
     lo = min(offs, key=lambda t: (t[0], -t[1].year)); hi = max(offs, key=lambda t: (t[0], t[1].year))   # ties: most recent year

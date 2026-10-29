@@ -4,7 +4,7 @@ import streamlit as st
 from calendar_core import astro, climo, db, holidays, ical, importers, milestones, patterns, preview, recurrence, render_pdf as R
 
 st.set_page_config(page_title="Weathercast Planning Calendar", layout="wide")
-APP_VERSION = "2026-10-16b"
+APP_VERSION = "2026-10-29a"
 
 # Hosted database settings may come from Streamlit secrets; the storage layer reads the environment.
 for _k in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
@@ -240,8 +240,8 @@ with tab_cats:
 with tab_ms:
     old = db.outdated_climo_milestones(con)
     if old:
-        st.warning(f"{len(old)} accepted climo entr{'y was' if len(old) == 1 else 'ies were'} calculated from 1991-2020 only, so the "
-                   "\"earliest/latest\" dates are wrong (e.g. the earliest 1\" snow is not Oct 30). Corrected versions use the full record: "
+        st.warning(f"{len(old)} accepted climo entr{'y was' if len(old) == 1 else 'ies were'} calculated with an older method and now differ from the current "
+                   "numbers (earliest/latest dates now use the whole record; averages now use 30 years with the fraction of a day dropped, like xmACIS): "
                    + "; ".join(f"{e['title']} ({e['start_date']})" for _, e in old))
         if st.button("Move these to the trash and propose corrected versions"):
             n = db.retire_outdated_climo_milestones(con); snapshot()

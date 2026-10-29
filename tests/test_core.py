@@ -272,7 +272,7 @@ def test_climo_extremes_use_full_record_but_averages_use_1991_2020():
     assert (early[0], early[1]) == (D(2026, 10, 22), 1925)                    # earliest 1" snow on record
     rec = {k: v for k, v in st["record"]["first_snow_1in"].items()}; assert rec["1962"] == "1962-10-25"   # Oct 25, 1962 is in the record
     assert D(2026, 11, 25) < m < D(2026, 12, 25) and early[2] < 1900           # average still the 1991-2020 mean (~Dec 10)
-    assert len(st["first_snow_1in"]) == 29 and len(st["record"]["first_snow_1in"]) > 100
+    assert len(st["first_snow_1in"]) == 30 and len(st["record"]["first_snow_1in"]) > 100
     assert climo.summary("first_snow_meas", 2026, st)[1][0] == D(2026, 10, 10)      # Oct 10, 1906 (0.1 in)
 
 def test_missing_data_years_are_excluded_from_record_extremes():
@@ -290,7 +290,7 @@ def test_old_climo_extremes_can_be_retired_and_reproposed(con):
     assert "on record (1925)" in cands["climo:first_snow_1in:rec_earliest:2026"]["title"]
     i = db.add_event(con, "Earliest first 1\" snow (1993)", "2026-10-30")
     db.decide_milestone(con, "climo:first_snow_1in:earliest:2026", "accepted", i)       # an entry from the old definition
-    db.decide_milestone(con, "climo:first_snow_1in:avg:2026", "accepted", db.add_event(con, "Avg first 1\" snow", "2026-12-10"))
+    db.decide_milestone(con, "climo:first_snow_1in:avg:2026", "accepted", db.add_event(con, "Avg first 1\" snow", str(cands["climo:first_snow_1in:avg:2026"]["date"])))
     assert [e["id"] for _, e in db.outdated_climo_milestones(con)] == [i]
     assert db.retire_outdated_climo_milestones(con) == 1
     assert [e["title"] for e in db.events(con)] == ["Avg first 1\" snow"] and len(db.events(con, only_deleted=True)) == 1
@@ -438,3 +438,39 @@ def test_format_dates_compact():
     span = {"kind": "hebrew", "month": 9, "day": 25, "days": 8}; two = {"kind": "hebrew", "month": 7, "day": 1, "days": 2}
     assert rc.format_dates(rc.dates_for_rule(span, 2026)) == "Dec 5-12" and rc.format_dates(rc.dates_for_rule(two, 2026)) == "Sep 12-13"
     assert rc.format_dates([D(2026, 12, 30), D(2026, 12, 31), D(2027, 1, 1)]) == "Dec 30 - Jan 1" and rc.format_dates([D(2026, 4, 5)]) == "Apr 5"
+
+
+def test_measurable_snow_series_and_means_match_xmacis_table():
+    """The xmACIS First/Last Summary for Columbus Area (measurable snow, 1991-2020): all 60 dates plus min/mean/max."""
+    from calendar_core import climo
+    fx = _fixture("xmacis_snow_meas_1991_2020.json"); st = climo.stats()
+    first, last = st["first_snow_meas"], st["last_snow_meas"]       # first keyed by the season's start year; last keyed by season (spring is the next year)
+    assert len(first) == len(last) == 30
+    for y, row in fx["rows"].items():
+        assert first[y][5:] == row["first"], ("first", y, first[y], row["first"])
+        assert last[str(int(y) - 1)][5:] == row["last"], ("last", y, last[str(int(y) - 1)], row["last"])
+    mean_first, early, late = climo.summary("first_snow_meas", 2026, st)
+    assert (f"{mean_first:%m-%d}", f"{climo.summary('last_snow_meas', 2026, st)[0]:%m-%d}") == (fx["summary"]["first"]["mean"], fx["summary"]["last"]["mean"])   # 11-23 and 03-27
+    # min/max over the 1991-2020 series only (the app's earliest/latest use the full record)
+    offs = lambda k: sorted(climo._offsets(k, st[k]), key=lambda t: t[0])
+    assert (f"{offs('first_snow_meas')[0][1]:%m-%d}", f"{offs('first_snow_meas')[-1][1]:%m-%d}") == ("10-30", "01-10")
+    assert (f"{offs('last_snow_meas')[0][1]:%m-%d}", f"{offs('last_snow_meas')[-1][1]:%m-%d}") == ("02-16", "04-24")
+
+def test_mean_date_drops_the_fraction_of_a_day():
+    from calendar_core import climo
+    st = {"first_freeze": {"2000": "2000-10-01", "2001": "2001-10-02", "2002": "2002-10-02"}}      # offsets 273, 274, 274 -> mean 273.67
+    mean = climo.summary("first_freeze", 2026, st)[0]; assert mean == D(2026, 10, 1)             # Oct 1.67 -> Oct 1, not Oct 2
+
+
+def test_stale_accepted_average_is_flagged_only_when_its_date_changed(con):
+    from calendar_core import milestones
+    cands = {m["key"]: m for m in milestones.propose(2026)}
+    good, stale = cands["climo:last_snow_meas:avg:2026"], cands["climo:first_snow_meas:avg:2026"]
+    assert str(stale["date"]) == "2026-11-23"
+    milestones.accept(con, good)                                                       # accepted with the current date
+    i = db.add_event(con, stale["title"], "2026-11-24"); db.decide_milestone(con, stale["key"], "accepted", i)     # accepted under the old rounding (Nov 24)
+    assert [(k, e["start_date"]) for k, e in db.outdated_climo_milestones(con)] == [("climo:first_snow_meas:avg:2026", "2026-11-24")]
+    assert db.retire_outdated_climo_milestones(con) == 1
+    pending = {m["key"] for m in milestones.pending(con, 2026)}
+    assert "climo:first_snow_meas:avg:2026" in pending and "climo:last_snow_meas:avg:2026" not in pending      # re-proposed; the good one stays accepted
+    assert [e["title"] for e in db.events(con)] == [good["title"]]
