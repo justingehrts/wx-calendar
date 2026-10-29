@@ -81,6 +81,20 @@ This path is also untested (no Docker daemon in the authoring environment).
   on moon sighting and can differ by a day, so those events carry a "predicted date: confirm" note in the Events tab and can be overridden with
   'Listed dates per year'); and optional popular observances (Mother's Day, Father's Day, Halloween, and others). Entries added by earlier
   versions of the lists are detected in Settings and can be moved to the trash in one click.
+- **Meteor showers**: peak nights come from the [American Meteor Society's calendar](https://www.amsmeteors.org/calendar/) (Settings > Refresh meteor
+  shower peak nights). That page is a rolling window of the next twelve months, so a snapshot is bundled in `reference/meteor_ams.json` and refreshing
+  replaces it. Each shower is proposed as a two-night bar (e.g. Oct 21-22) with the Moon on the peak night in the note. Showers or years the AMS page does not
+  cover (past showers, or dates more than a year out) fall back to `reference/meteor_showers.json`: verified dates under `"years"` if you add any, otherwise
+  *typical* dates, which are clearly labelled "TYPICAL ... NOT verified". If the AMS page layout changes, the refresh refuses to save and keeps the old data;
+  a card that cannot be read is reported.
+- **Holidays** (Settings > Holidays; every item is a repeat rule, so dates are calculated for any year and nothing is retyped at rollover):
+  U.S. federal (actual dates, not "observed" days); Christian (Mardi Gras, Easter, Orthodox Easter, Christmas Eve, Christmas; Easter from the
+  standard computus); Jewish (Purim, Passover, Rosh Hashanah, Yom Kippur, Hanukkah, each a single "... begins" marker on the evening it starts,
+  i.e. the sundown before its first full day; dates from the Hebrew calendar via `pyluach`, with Purim moving to Adar II in leap years); Muslim
+  (Ramadan begins, Eid al-Fitr, Eid al-Adha, predicted from the Umm al-Qura calendar via `hijridate`, valid 1924-2077; the observed day depends
+  on moon sighting and can differ by a day, so those events carry a "predicted date: confirm" note in the Events tab and can be overridden with
+  'Listed dates per year'); and optional popular observances (Mother's Day, Father's Day, Halloween, and others). Entries added by earlier
+  versions of the lists are detected in Settings and can be moved to the trash in one click.
 - **Meteor showers**: `reference/meteor_showers.json` has *typical* peak dates. Add verified dates for a year under `"years"`
   (from the IMO or AMS calendar); until then the proposals say "typical date, not verified".
 

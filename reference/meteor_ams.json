@@ -1,0 +1,114 @@
+{
+ "source": "https://www.amsmeteors.org/calendar/",
+ "fetched": "2026-10-29",
+ "showers": [
+  {
+   "slug": "orionids",
+   "name": "Orionids",
+   "start": "2026-10-21",
+   "end": "2026-10-22",
+   "active": "October 2 \u2013 November 7, 2026",
+   "moon_pct": 74,
+   "moon_phase": "Waxing gibbous"
+  },
+  {
+   "slug": "southern_taurids",
+   "name": "Southern Taurids",
+   "start": "2026-11-04",
+   "end": "2026-11-05",
+   "active": "September 20 \u2013 November 20, 2026",
+   "moon_pct": 25,
+   "moon_phase": "Waning crescent"
+  },
+  {
+   "slug": "northern_taurids",
+   "name": "Northern Taurids",
+   "start": "2026-11-11",
+   "end": "2026-11-12",
+   "active": "October 20 \u2013 December 10, 2026",
+   "moon_pct": 4,
+   "moon_phase": "Waxing crescent"
+  },
+  {
+   "slug": "leonids",
+   "name": "Leonids",
+   "start": "2026-11-16",
+   "end": "2026-11-17",
+   "active": "November 6\u201330, 2026",
+   "moon_pct": 39,
+   "moon_phase": "Waxing crescent"
+  },
+  {
+   "slug": "geminids",
+   "name": "Geminids",
+   "start": "2026-12-13",
+   "end": "2026-12-14",
+   "active": "December 4\u201317, 2026",
+   "moon_pct": 15,
+   "moon_phase": "Waxing crescent"
+  },
+  {
+   "slug": "ursids",
+   "name": "Ursids",
+   "start": "2026-12-21",
+   "end": "2026-12-22",
+   "active": "December 17\u201326, 2026",
+   "moon_pct": 89,
+   "moon_phase": "Waxing gibbous"
+  },
+  {
+   "slug": "quadrantids",
+   "name": "Quadrantids",
+   "start": "2027-01-03",
+   "end": "2027-01-04",
+   "active": "December 28, 2026 to January 12, 2027",
+   "moon_pct": 18,
+   "moon_phase": "Waning crescent"
+  },
+  {
+   "slug": "lyrids",
+   "name": "Lyrids",
+   "start": "2027-04-21",
+   "end": "2027-04-22",
+   "active": "April 14\u201330, 2027",
+   "moon_pct": 100,
+   "moon_phase": "Full moon"
+  },
+  {
+   "slug": "eta_aquariids",
+   "name": "Eta Aquariids",
+   "start": "2027-05-05",
+   "end": "2027-05-06",
+   "active": "April 19 \u2013 May 28, 2027",
+   "moon_pct": 2,
+   "moon_phase": "Waning crescent"
+  },
+  {
+   "slug": "southern_delta_aquariids",
+   "name": "Southern Delta Aquariids",
+   "start": "2027-07-30",
+   "end": "2027-07-31",
+   "active": "July 12 \u2013 August 23, 2027",
+   "moon_pct": 14,
+   "moon_phase": "Waning crescent"
+  },
+  {
+   "slug": "alpha_capricornids",
+   "name": "Alpha Capricornids",
+   "start": "2027-07-30",
+   "end": "2027-07-31",
+   "active": "July 3 \u2013 August 15, 2027",
+   "moon_pct": 14,
+   "moon_phase": "Waning crescent"
+  },
+  {
+   "slug": "perseids",
+   "name": "Perseids",
+   "start": "2027-08-12",
+   "end": "2027-08-13",
+   "active": "July 17 \u2013 August 24, 2027",
+   "moon_pct": 79,
+   "moon_phase": "Waxing gibbous"
+  }
+ ]
+}

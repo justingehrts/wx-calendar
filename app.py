@@ -1,10 +1,10 @@
 import datetime as dt, json, os, hmac
 import pandas as pd
 import streamlit as st
-from calendar_core import astro, climo, db, holidays, ical, importers, milestones, patterns, preview, recurrence, render_pdf as R
+from calendar_core import astro, climo, db, holidays, ical, importers, meteors, milestones, patterns, preview, recurrence, render_pdf as R
 
 st.set_page_config(page_title="Weathercast Planning Calendar", layout="wide")
-APP_VERSION = "2026-10-29a"
+APP_VERSION = "2026-10-29b"
 
 # Hosted database settings may come from Streamlit secrets; the storage layer reads the environment.
 for _k in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
@@ -240,8 +240,9 @@ with tab_cats:
 with tab_ms:
     old = db.outdated_climo_milestones(con)
     if old:
-        st.warning(f"{len(old)} accepted climo entr{'y was' if len(old) == 1 else 'ies were'} calculated with an older method and now differ from the current "
-                   "numbers (earliest/latest dates now use the whole record; averages now use 30 years with the fraction of a day dropped, like xmACIS): "
+        st.warning(f"{len(old)} accepted milestone entr{'y was' if len(old) == 1 else 'ies were'} calculated with an older method and now differ from the current "
+                   "numbers (climo earliest/latest dates now use the whole record, averages use 30 years with the fraction of a day dropped like xmACIS, "
+                   "meteor shower peaks use the American Meteor Society's peak nights where available): "
                    + "; ".join(f"{e['title']} ({e['start_date']})" for _, e in old))
         if st.button("Move these to the trash and propose corrected versions"):
             n = db.retire_outdated_climo_milestones(con); snapshot()
@@ -254,8 +255,8 @@ with tab_ms:
         groups = {"Sun and sky": lambda r: r["key"].startswith(("sun:", "dst:")), "Meteor showers": lambda r: r["key"].startswith("meteor:"), "Climo": lambda r: r["key"].startswith("climo:")}
         pick = st.multiselect("Show", list(groups), list(groups))
         rows = [r for r in pend if any(groups[g](r) for g in pick)]
-        mdf = pd.DataFrame([{"decision": "", "date": r["date"], "title": r["title"], "category": r["category"], "note": r["note"]} for r in rows])
-        ed = st.data_editor(mdf, hide_index=True, width="stretch", disabled=["date", "title", "category", "note"], key=f"ms{year}{len(pend)}",
+        mdf = pd.DataFrame([{"decision": "", "date": r["date"], "through": r["end"], "title": r["title"], "category": r["category"], "note": r["note"]} for r in rows])
+        ed = st.data_editor(mdf, hide_index=True, width="stretch", disabled=["date", "through", "title", "category", "note"], key=f"ms{year}{len(pend)}",
                             column_config={"decision": st.column_config.SelectboxColumn(options=["", "Accept", "Reject"])})
         if st.button("Apply decisions", type="primary"):
             n = 0
@@ -303,6 +304,13 @@ with tab_set:
     if st.button("Refresh normals, records and statistics from RCC-ACIS"):
         try: climo.fetch_normals_records(); climo.fetch_stats(); st.success("Climate data refreshed.")
         except Exception as ex: st.error(f"ACIS fetch failed: {ex}")
+    ams = meteors.cached()
+    st.write(f"Meteor shower peak nights: {len(ams['showers'])} showers from the American Meteor Society, last fetched {ams['fetched']}" if ams else "Meteor shower peak nights: not loaded (typical dates are used)")
+    if st.button("Refresh meteor shower peak nights from the American Meteor Society"):
+        try:
+            n = meteors.fetch(); st.success(f"Loaded {n} showers (a rolling window of the next twelve months). New proposals appear in the Milestones tab.")
+            if (meteors.cached() or {}).get("skipped"): st.warning("These cards could not be read and were left out: " + ", ".join(meteors.cached()["skipped"]))
+        except Exception as ex: st.error(f"Could not read the AMS calendar: {ex}")
     st.divider(); st.subheader("Holidays")
     keys = list(holidays.HOLIDAY_SETS)
     chosen = st.multiselect("Holiday sets to add", keys, default=holidays.DEFAULT_SETS, format_func=lambda k: holidays.HOLIDAY_SETS[k][0])

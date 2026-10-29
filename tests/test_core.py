@@ -474,3 +474,70 @@ def test_stale_accepted_average_is_flagged_only_when_its_date_changed(con):
     pending = {m["key"] for m in milestones.pending(con, 2026)}
     assert "climo:first_snow_meas:avg:2026" in pending and "climo:last_snow_meas:avg:2026" not in pending      # re-proposed; the good one stays accepted
     assert [e["title"] for e in db.events(con)] == [good["title"]]
+
+
+# --------------------------------------------------------- American Meteor Society calendar
+def _ams_cards():
+    import os
+    return open(os.path.join(os.path.dirname(__file__), "fixtures", "ams_calendar_cards.html")).read()
+
+def test_ams_calendar_parse():
+    from calendar_core import meteors
+    s = {x["slug"]: x for x in meteors.parse_calendar(_ams_cards())}
+    assert len(s) == 12 and list(s)[:2] == ["orionids", "southern_taurids"]
+    o = s["orionids"]; assert (o["start"], o["end"], o["moon_pct"], o["moon_phase"]) == ("2026-10-21", "2026-10-22", 74, "Waxing gibbous")
+    assert (s["geminids"]["start"], s["geminids"]["end"]) == ("2026-12-13", "2026-12-14") and s["geminids"]["moon_pct"] == 15
+    q = s["quadrantids"]; assert (q["start"], q["end"]) == ("2027-01-03", "2027-01-04")           # year comes from the peak night itself, not the Dec 2026 activity start
+    assert s["lyrids"]["moon_phase"] == "Full moon" and s["lyrids"]["moon_pct"] == 100 and s["perseids"]["start"] == "2027-08-12"
+    assert "eta_aquariids" in s and "southern_delta_aquariids" in s and s["eta_aquariids"]["name"] == "Eta Aquariids"
+    assert meteors.slug("η Aquariids") == "eta_aquariids" and meteors.slug("Southern δ-Aquariids") == "southern_delta_aquariids"
+
+def test_ams_peak_across_a_month_and_year_boundary():
+    from calendar_core import meteors
+    card = lambda peak: ('<article id="x" class="shower-card"><div class="shower-card__date"><div class="shower-card__date_title">PEAK NIGHT</div>Dec 31–Jan 1</div>'
+                         f'<h2 class="shower-card__name">Test Shower</h2><p>The Moon will be 50 % illuminated · First quarter on peak night ( {peak} ).</p></article>')
+    for peak in ("Dec 31 – Jan 1, 2027", "Dec 31, 2026 – Jan 1, 2027"):          # the year belongs to the end date, or both years are spelled out
+        [s] = meteors.parse_calendar(card(peak)); assert (s["start"], s["end"]) == ("2026-12-31", "2027-01-01"), peak
+    [s] = meteors.parse_calendar(card("Jan 3–4, 2027")); assert (s["start"], s["end"]) == ("2027-01-03", "2027-01-04")
+    shows, skipped = meteors.parse_calendar_with_skips(card("Oct 3-4, 2027") + card("sometime in October").replace("Test Shower", "Odd Shower"))
+    assert [x["name"] for x in shows] == ["Test Shower"] and skipped == ["Odd Shower"]         # an unreadable card is reported, not silently dropped
+    assert meteors.parse_calendar("<html>no cards here</html>") == []
+
+def test_ams_fetch_refuses_a_changed_layout_and_keeps_the_old_cache(tmp_path, monkeypatch):
+    from calendar_core import meteors, paths, store
+    monkeypatch.setattr(paths, "CACHE", str(tmp_path / "cache")); store._mem.clear()
+    class Resp:
+        def __init__(self, body): self.body = body
+        def read(self): return self.body.encode()
+    monkeypatch.setattr(meteors.urllib.request, "urlopen", lambda req, timeout=0: Resp(_ams_cards()))
+    assert meteors.fetch() == 12 and meteors.cached()["showers"][0]["slug"] == "orionids"
+    monkeypatch.setattr(meteors.urllib.request, "urlopen", lambda req, timeout=0: Resp("<html><body>redesigned</body></html>"))
+    try: meteors.fetch(); raise AssertionError("should have refused")
+    except ValueError as e: assert "layout" in str(e)
+    assert len(meteors.cached()["showers"]) == 12                                       # the good copy is still there
+
+def test_meteor_milestones_prefer_ams_then_fall_back_to_typical():
+    from calendar_core import milestones
+    m26 = {r["key"]: r for r in milestones.propose(2026) if r["key"].startswith("meteor:")}
+    o = m26["meteor:orionids:2026"]; assert (o["date"], o["end"]) == (D(2026, 10, 21), D(2026, 10, 22)) and "American Meteor Society" in o["note"] and "TYPICAL" not in o["note"]
+    assert "74% illuminated" in o["note"] and o["title"] == "Orionids meteor shower peak"
+    assert (m26["meteor:geminids:2026"]["date"], m26["meteor:geminids:2026"]["end"]) == (D(2026, 12, 13), D(2026, 12, 14))
+    assert "meteor:southern_taurids:2026" in m26 and "meteor:northern_taurids:2026" in m26                      # AMS showers beyond the typical list
+    p = m26["meteor:perseids:2026"]; assert p["date"] == D(2026, 8, 12) and p["end"] is None and "TYPICAL" in p["note"]      # past, outside AMS's window
+    m27 = {r["key"]: r for r in milestones.propose(2027) if r["key"].startswith("meteor:")}
+    assert m27["meteor:quadrantids:2027"]["date"] == D(2027, 1, 3) and m27["meteor:perseids:2027"]["end"] == D(2027, 8, 13) and "American" in m27["meteor:perseids:2027"]["note"]
+    assert "TYPICAL" in m27["meteor:leonids:2027"]["note"] and "TYPICAL" in m27["meteor:geminids:2027"]["note"]      # Nov/Dec 2027 not yet on AMS's page
+    assert len([k for k in m27 if k.startswith("meteor:orionids")]) == 1                                         # a shower is never proposed twice
+
+def test_accepting_a_meteor_peak_makes_a_two_night_bar_and_old_entries_are_flagged(con):
+    from calendar_core import milestones
+    cands = {m["key"]: m for m in milestones.propose(2026)}
+    eid = milestones.accept(con, cands["meteor:geminids:2026"]); e = db.get_event(con, eid)
+    assert (e["start_date"], e["end_date"], e["category"]) == ("2026-12-13", "2026-12-14", "Sky / Astronomy")
+    assert {x["title"] for x in db.events_on_day(con, D(2026, 12, 14))} == {"Geminids meteor shower peak"} and not db.outdated_climo_milestones(con)
+    # an entry accepted earlier from the typical date (a single day, Dec 14) is now stale
+    old = db.add_event(con, "Orionids meteor shower peak", "2026-10-21"); db.decide_milestone(con, "meteor:orionids:2026", "accepted", old)
+    assert [(k, x["start_date"]) for k, x in db.outdated_climo_milestones(con)] == [("meteor:orionids:2026", "2026-10-21")]
+    assert db.retire_outdated_climo_milestones(con) == 1
+    assert "meteor:orionids:2026" in {m["key"] for m in milestones.pending(con, 2026)} and "meteor:geminids:2026" not in {m["key"] for m in milestones.pending(con, 2026)}
+    pdf, rep = R.render(db.events(con), db.categories(con), 2026, [12], R.Options(details_page=False)); assert _pages(pdf) == 1

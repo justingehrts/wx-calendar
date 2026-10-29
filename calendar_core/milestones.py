@@ -1,7 +1,7 @@
 """Auto-generated milestone proposals (sun, sky, DST, climo). Nothing is added to the calendar
 until a person accepts it; rejected ones are remembered and do not come back."""
 import datetime as dt, json, os
-from . import astro, climo, db, paths
+from . import astro, climo, db, meteors, paths
 
 SKY, CLIMO, HOL = "Sky / Astronomy", "Climo records", "Holidays"
 
@@ -53,15 +53,30 @@ def sun_milestones(year):
     return out
 
 def meteor_milestones(year):
+    """Peak nights for `year`. Source priority per shower: the American Meteor Society calendar (verified, two-night span) where it covers
+    that year; else a verified date from reference/meteor_showers.json 'years'; else the typical date (flagged as unverified). Returns
+    (key, title, date, category, note, end_date_or_None) tuples."""
     p = os.path.join(paths.REFERENCE, "meteor_showers.json")
     data = json.load(open(p)) if os.path.exists(p) else {"typical": [], "years": {}}
-    verified = data.get("years", {}).get(str(year), {}); out = []
+    out, covered = [], set()
+    ams = meteors.cached() or {}
+    for s in ams.get("showers", []):
+        start, end = dt.date.fromisoformat(s["start"]), dt.date.fromisoformat(s["end"])
+        if start.year != year: continue
+        covered.add(s["slug"])
+        moon = f" Moon: {s['moon_pct']}% illuminated, {s['moon_phase'].lower()}." if s.get("moon_pct") is not None else ""
+        out.append((f"meteor:{s['slug']}:{year}", f"{s['name']} meteor shower peak", start, SKY,
+                    f"Peak night {start:%b} {start.day}-{end.day if end.month == start.month else end.strftime('%b ') + str(end.day)} per the American Meteor Society "
+                    f"(fetched {ams.get('fetched', '?')}).{moon}" + (f" Active {s['active']}." if s.get("active") else ""), end if end != start else None))
+    verified = data.get("years", {}).get(str(year), {})
     for s in data["typical"]:
+        sl = meteors.slug(s["name"])
+        if sl in covered: continue
         if s["name"] in verified:
             d, note = dt.date.fromisoformat(verified[s["name"]]), "Peak date verified for this year."
         else:
-            d, note = dt.date(year, s["month"], s["day"]), "TYPICAL date (±1 day), NOT verified for this year. Check the IMO/AMS calendar before airing."
-        out.append((f"meteor:{s['name'].lower().replace(' ', '_')}:{year}", f"{s['name']} meteor shower peak", d, SKY, note))
+            d, note = dt.date(year, s["month"], s["day"]), "TYPICAL date (±1 day), NOT verified for this year. Use Settings > refresh meteor showers, or check the IMO/AMS calendar."
+        out.append((f"meteor:{sl}:{year}", f"{s['name']} meteor shower peak", d, SKY, note, None))
     return out
 
 CLIMO_ITEMS = [   # (series key, label, include earliest/latest extremes)
@@ -90,15 +105,17 @@ def climo_milestones(year):
 
 def propose(year):
     rows = sun_milestones(year) + meteor_milestones(year) + climo_milestones(year)
-    return sorted(({"key": k, "title": t, "date": d, "category": c, "note": n} for k, t, d, c, n in rows),
-                  key=lambda r: (r["date"], r["title"]))
+    out = []
+    for k, t, d, c, n, *rest in rows:
+        out.append({"key": k, "title": t, "date": d, "category": c, "note": n, "end": rest[0] if rest else None})
+    return sorted(out, key=lambda r: (r["date"], r["title"]))
 
 def pending(con, year):
     seen = db.milestone_status(con)
     return [r for r in propose(year) if r["key"] not in seen]
 
 def accept(con, cand):
-    eid = db.add_event(con, cand["title"], cand["date"], None, db.category_id_by_name(con, cand["category"]) or None,
+    eid = db.add_event(con, cand["title"], cand["date"], cand.get("end"), db.category_id_by_name(con, cand["category"]) or None,
                        notes=cand["note"], detail_only=False)
     db.decide_milestone(con, cand["key"], "accepted", eid); return eid
 

@@ -289,20 +289,24 @@ def decide_milestone(con, key, status, event_id=None):
 _OLD_EXTREME = "(key LIKE 'climo:%:earliest:%' OR key LIKE 'climo:%:latest:%')"   # computed from 1991-2020 only (superseded)
 
 def outdated_climo_milestones(con):
-    """Accepted climo events whose calculation has since changed: [(key, event)]. Two cases: earliest/latest entries made before extremes used the
-    whole record, and 'Avg' entries whose date is no longer what the current method gives (30-year xmACIS-style means, fraction dropped)."""
+    """Accepted milestone events whose calculation has since changed: [(key, event)]. Cases: climo earliest/latest entries made before extremes used
+    the whole record; 'Avg' entries whose date is no longer what the current method gives (30-year xmACIS-style means); and meteor shower peaks whose
+    dates or span changed (e.g. a typical date replaced by the American Meteor Society's peak night)."""
     from . import milestones
     out = []
     for key, eid in _tuples(con, f"SELECT key, event_id FROM milestone_decisions WHERE status='accepted' AND {_OLD_EXTREME}"):
         e = get_event(con, eid) if eid else None
         if e and not e["deleted_at"]: out.append((key, e))
     cache = {}
-    for key, eid in _tuples(con, "SELECT key, event_id FROM milestone_decisions WHERE status='accepted' AND key LIKE 'climo:%:avg:%'"):
-        e = get_event(con, eid) if eid else None
-        if not e or e["deleted_at"]: continue
-        year = int(key.rsplit(":", 1)[1]); cache.setdefault(year, {r[0]: r for r in milestones.climo_milestones(year)})   # (key, title, date, category, note)
-        now_ = cache[year].get(key)
-        if now_ and str(now_[2]) != e["start_date"]: out.append((key, e))
+    for like, make in (("climo:%:avg:%", milestones.climo_milestones), ("meteor:%", milestones.meteor_milestones)):
+        for key, eid in _tuples(con, f"SELECT key, event_id FROM milestone_decisions WHERE status='accepted' AND key LIKE '{like}'"):
+            e = get_event(con, eid) if eid else None
+            if not e or e["deleted_at"]: continue
+            year = int(key.rsplit(":", 1)[1]); cache.setdefault((make, year), {r[0]: r for r in make(year)})   # rows: (key, title, date, category, note[, end])
+            now_ = cache[(make, year)].get(key)
+            if not now_: continue
+            end = now_[5] if len(now_) > 5 else None
+            if (str(now_[2]), str(end) if end else None, now_[1]) != (e["start_date"], e["end_date"], e["title"]): out.append((key, e))
     return out
 
 def retire_outdated_climo_milestones(con):
