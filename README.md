@@ -107,8 +107,15 @@ county and a "confirm dates" note. Counties come from the event's ZIP code (a ZI
   public event pages: it finds them through the sitemap, keeps festival-like addresses (editable word lists), reads each page's title line
   (name, dates, city and ZIP), waits 2 seconds between pages as the site's robots.txt asks, caches what it reads, and fetches in batches of 60.
 - **Calendar (.ics) feeds**: add any visitors bureau or fairground feed in Sources. All-day events are handled correctly (the end date in a feed is exclusive).
-- **Planned**: the Ohio Department of Agriculture's official county-fair schedule and county visitors-bureau calendars, which need network access to
-  those sites (see the notes on allowed domains).
+- **Ohio Department of Agriculture fair schedule**: reads the official "Ohio Agricultural Fair Chronological Schedule" brochure (PDF): the Ohio State Fair,
+  every county fair and the independent fairs, with dates. `agri.ohio.gov` refuses automated downloads, so upload the year's brochure in Sources (ODA
+  publishes it each December); a copy of the 2026 one is bundled in `reference/`. The 2026 brochure covers all 22 counties (25 fairs). Fairs already over are
+  skipped unless you tick the box.
+- **Visitors-bureau event data** (checked 2026-10-30, all 22 counties): only **Athens County** publishes a usable event feed (The Events Calendar's public
+  JSON, read 50 events at a time, 10 seconds apart as its robots.txt asks, festival-like words only). The others have no calendar feed: Franklin
+  (Experience Columbus, above); Fairfield, Guernsey and Madison publish an "events" RSS whose dates are only in the text or title, and Coshocton, Ross and Perry's
+  county site publish blog-post or government-meeting feeds. Delaware, Hocking, Knox, Licking, Marion, Morgan, Muskingum and Pike have visitor sites with no feed at the usual
+  addresses. No official bureau site was found for Crawford, Fayette, Hardin, Morrow, Pickaway or Union. If a bureau gives you an `.ics` address, add it under Calendar feeds.
 
 ## Layout
     app.py                  Streamlit UI + passcode gate

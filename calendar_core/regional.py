@@ -7,6 +7,8 @@ Connectors:
     the Ohio State Fair, every county fair and the independent fairs, with dates. Read from the PDF with pypdfium2.
   * Experience Columbus: public event pages found through the site's sitemap (robots.txt allows it with a 2-second crawl delay, which
     we honor). The site has no calendar feed or open API, so this reads the same pages a visitor sees.
+  * Visitors-bureau event APIs: sites running The Events Calendar (WordPress) publish their events as JSON at /wp-json/tribe/events/v1/events.
+    Athens County is the one bureau in the 22 counties found with real published event data (see CVB_SOURCES).
   * iCal (.ics) feeds: any visitors bureau / fairground that publishes one."""
 import datetime as dt, html, json, re, time, urllib.request
 from . import db, store
@@ -133,6 +135,33 @@ def fetch_oda_fairs(pdf, counties=None, today=None, include_past=False, url=None
         new += db.upsert_candidate(con, "oda_fairs", r["uid"], r["title"], r["start"], r["end"], r["city"], r["county"], url or ODA_BROCHURE)
     return {"new": new, "seen": seen, "outside": outside, "total": len(rows), "year": rows[0]["start"][:4] if rows else None}
 
+# ----------------------------------------------------------- visitors bureaus with published event data
+# Checked 2026-10-30 across the 22 counties: only Athens publishes a usable event feed. Others have blog-post RSS only (no event dates) or none.
+# `delay` is the Crawl-delay in the site's robots.txt.
+CVB_SOURCES = [{"id": "cvb:athens", "name": "Athens County Visitors Bureau", "county": "Athens", "kind": "tribe", "url": "https://athensohio.com", "delay": 10}]
+
+def fetch_tribe_events(source_id, base_url, county, keywords=None, exclude=None, today=None, delay=10.0, per_page=50, max_pages=12, get=_http_get, sleep=time.sleep):
+    """Read a WordPress 'The Events Calendar' site's public JSON (upcoming events, paged) and store the festival-like ones as candidates. Words are
+    matched against the event's web address and title, as for Experience Columbus. Returns {'new', 'seen', 'total', 'skipped'}."""
+    today = today or dt.date.today(); con = db.connect()
+    kw = [k.lower() for k in (keywords or DEFAULT_KEYWORDS)]; ex = [x.lower() for x in (DEFAULT_EXCLUDE if exclude is None else exclude)]
+    new = seen = skipped = total = 0; page = 1
+    while page <= max_pages:
+        if page > 1: sleep(delay)
+        data = json.loads(get(f"{base_url.rstrip('/')}/wp-json/tribe/events/v1/events?per_page={per_page}&page={page}&start_date={today.isoformat()}"))
+        for e in data.get("events", []):
+            title = html.unescape(e.get("title") or "").strip(); url = e.get("url") or base_url
+            hay = (url.rstrip("/").rsplit("/", 1)[-1] + " " + title.lower().replace(" ", "-"))
+            if not title or not e.get("start_date") or not any(k in hay for k in kw) or any(x in hay for x in ex): skipped += 1; continue
+            start, end = e["start_date"][:10], (e.get("end_date") or e["start_date"])[:10]
+            if end < today.isoformat(): skipped += 1; continue
+            v = e.get("venue") or {}; v = v if isinstance(v, dict) else {}
+            seen += 1; new += db.upsert_candidate(con, source_id, str(e.get("id") or url), title, start, max(end, start), v.get("city") or "", county, url)
+        total = data.get("total", total)
+        if page >= int(data.get("total_pages") or 1): break
+        page += 1
+    return {"new": new, "seen": seen, "total": total, "skipped": skipped}
+
 # ------------------------------------------------------------------------------- iCal feeds
 def parse_ics(text):
     """Minimal iCalendar reader: VEVENTs -> [{uid, title, start, end (inclusive), location, url}]. All-day DTEND is exclusive in iCal, so one day is
@@ -188,3 +217,4 @@ def accept(con, cand_id):
     db.decide_candidate(con, cand_id, "accepted", eid); return eid
 
 SOURCE_NAMES = {"experience_columbus": "Experience Columbus (event pages)", "oda_fairs": "Ohio Department of Agriculture fair schedule"}
+SOURCE_NAMES.update({c["id"]: c["name"] + " (event calendar)" for c in CVB_SOURCES})

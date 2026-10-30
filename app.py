@@ -287,6 +287,13 @@ with tab_reg:
                 r = regional.fetch_oda_fairs(pdf, counties, include_past=past)
                 st.success(f"{r['year']} schedule: {r['total']} fairs listed; {r['new']} new proposal(s), {r['seen']} in your counties" + ("" if past else " that are still to come") + ".")
             except Exception as ex: st.error(f"Could not read the fair schedule: {ex}")
+        st.markdown("**County visitors bureaus with published event data** (read politely, at the pace each site's robots.txt asks; uses the festival-like words below).")
+        if st.button("Fetch " + ", ".join(c["county"] for c in regional.CVB_SOURCES) + " visitors-bureau events"):
+            for cv in [c for c in regional.CVB_SOURCES if c["county"] in counties]:
+                try:
+                    r = regional.fetch_tribe_events(cv["id"], cv["url"], cv["county"], delay=cv["delay"], keywords=db.get_setting(con, "ec_keywords", regional.DEFAULT_KEYWORDS), exclude=db.get_setting(con, "ec_exclude", regional.DEFAULT_EXCLUDE))
+                    st.success(f"{cv['name']}: {r['new']} new proposal(s); {r['seen']} festival-like of {r['total']} upcoming events.")
+                except Exception as ex: st.error(f"{cv['name']}: {ex}")
         st.markdown("**Experience Columbus** (public event pages; the site has no calendar feed, so pages are read politely: 2 seconds apart, as its robots.txt asks, and cached).")
         kws = st.text_input("Festival-like words in the event's web address", ", ".join(db.get_setting(con, "ec_keywords", regional.DEFAULT_KEYWORDS)))
         exs = st.text_input("Skip addresses containing", ", ".join(db.get_setting(con, "ec_exclude", regional.DEFAULT_EXCLUDE)))

@@ -1,4 +1,4 @@
-import datetime as dt, io, os, threading
+import datetime as dt, io, json, os, re, threading
 import pypdfium2 as pdfium
 from calendar_core import astro, db, ical, importers, milestones, patterns, preview, recurrence as rc, render_pdf as R
 
@@ -673,3 +673,21 @@ def test_oda_real_brochure_covers_all_22_counties_and_import_is_reviewed_not_add
     assert any(c["title"] == "Ohio State Fair" and c["county"] == "Franklin" for c in rg.db.candidates(con, "new")) and not rg.db.events(con)
     late = rg.fetch_oda_fairs(pdf, ["Fairfield"], today=dt.date(2026, 10, 18)); assert late["seen"] == 0   # Fairfield ended Oct 17: nothing to propose
     assert rg.fetch_oda_fairs(pdf, ["Fairfield"], today=dt.date(2026, 10, 18), include_past=True)["seen"] == 1
+
+def test_tribe_events_connector_pages_filters_and_is_polite(con, monkeypatch):
+    from calendar_core import regional as rg
+    monkeypatch.setattr(rg.db, "connect", lambda *a, **k: con)
+    ev = lambda i, t, s, e, slug: {"id": i, "title": t, "url": f"https://x.test/event/{slug}/", "start_date": s + " 10:00:00", "end_date": e + " 18:00:00", "venue": {"city": "Nelsonville"}}
+    pages = {1: {"total": 5, "total_pages": 2, "events": [ev(1, "Honey for the Heart Parade", "2026-11-07", "2026-11-07", "honey-parade"),
+                                                         ev(2, "Soap Making Workshop", "2026-11-08", "2026-11-08", "soap-workshop"),
+                                                         ev(3, "Old Fest", "2026-10-01", "2026-10-02", "old-fest")]},
+             2: {"total": 5, "total_pages": 2, "events": [ev(4, "Ohio Pawpaw Festival &amp; Fair", "2027-09-17", "2027-09-19", "pawpaw"), ev(5, "Yoga Fest", "2026-12-01", "2026-12-01", "yoga-fest")]}}
+    calls, sleeps = [], []
+    def get(url): calls.append(url); return json.dumps(pages[int(re.search(r"[?&]page=(\d+)", url)[1])])
+    r = rg.fetch_tribe_events("cvb:t", "https://x.test", "Athens", today=dt.date(2026, 10, 30), delay=10, get=get, sleep=sleeps.append)
+    assert (r["new"], r["seen"], r["total"], r["skipped"]) == (2, 2, 5, 3)             # workshop (no festival word), ended event, 'yoga' exclusion are skipped
+    assert sleeps == [10] and len(calls) == 2                                           # one pause between the two pages, as robots.txt asks
+    c = {x["title"]: x for x in rg.db.candidates(con, "new")}
+    assert set(c) == {"Honey for the Heart Parade", "Ohio Pawpaw Festival & Fair"} and c["Honey for the Heart Parade"]["county"] == "Athens" and c["Honey for the Heart Parade"]["city"] == "Nelsonville"
+    assert rg.fetch_tribe_events("cvb:t", "https://x.test", "Athens", today=dt.date(2026, 10, 30), get=get, sleep=lambda s: None)["new"] == 0       # idempotent
+    assert rg.SOURCE_NAMES["cvb:athens"].startswith("Athens County Visitors Bureau")
