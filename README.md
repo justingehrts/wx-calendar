@@ -113,8 +113,10 @@ county and a "confirm dates" note. Counties come from the event's ZIP code (a ZI
   skipped unless you tick the box.
 - **ohio.org Festivals & Events** (TourismOhio): the site's pages load every event from one public JSON search; the app makes that single request (the path
   is not covered by its robots.txt), keeps events whose address ZIP falls in your counties and whose title/address has a festival-like word or whose topic is
-  fairs/festivals, and proposes them. **Untested against the live site**: ohio.org returns an error page to automated requests from some networks (it did from
-  the build server), and the response shape was written from the page's own script and two sample pages. Only the date of each event is used (its times of day
+  fairs/festivals, and proposes them. **Checked against five real records, not the live site**: ohio.org returns an error page to automated requests from some networks (it did from
+  the build server). The response shape matches sample records pasted from the site (epoch-millisecond dates at 07:00 UTC, ZIP last in the address). The app asks only
+  for events that have not ended, 1,000 at a time; the site's plain list stops at 5,000 and is mostly past events, so if the narrowed query is refused the app falls back
+  to it and says so. Only the date of each event is used (its times of day
   are placeholders; WinterFest Columbus is one day despite a weekly hours table on its page). If the button reports an error, the site is refusing the request.
 - **Visitors-bureau event data** (checked 2026-10-30, all 22 counties): only **Athens County** publishes a usable event feed (The Events Calendar's public
   JSON, read 50 events at a time, 10 seconds apart as its robots.txt asks, festival-like words only). The others have no calendar feed: Franklin

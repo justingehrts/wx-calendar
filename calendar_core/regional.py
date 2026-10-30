@@ -13,7 +13,7 @@ Connectors:
     does not cover it). One request, then counties come from the ZIP in each event's address. Written from the page's own script, so the exact
     response shape is an assumption that has not been run against the live site (ohio.org refuses automated requests from some networks).
   * iCal (.ics) feeds: any visitors bureau / fairground that publishes one."""
-import datetime as dt, html, json, re, time, urllib.request
+import datetime as dt, html, json, re, time, urllib.parse, urllib.request
 from . import db, store
 
 UA = "wx-calendar/1.0 (TV weather planning calendar; polite, cached)"
@@ -201,17 +201,34 @@ def parse_ohio_org(data, keywords=None, exclude=None):
                     "url": f"{OHIO_ORG}/{tail}" if tail else OHIO_ORG, "topics": topics})
     return out
 
-def fetch_ohio_org(counties=None, keywords=None, exclude=None, today=None, get=_http_get):
-    """One request to ohio.org's event search; festival-like events in the chosen counties become candidates. Returns {'new','seen','total','outside'}."""
-    counties = set(counties or MARKET_COUNTIES); today = today or dt.date.today(); con = db.connect()
-    raw = get(OHIO_ORG_SEARCH); total = len(((json.loads(raw).get("hits") or {}).get("hits") or [])) if raw.lstrip().startswith("{") else 0
+def ohio_org_url(today, start=0, size=1000):
+    """The site's own event search, narrowed to events whose end date is today or later (dates are epoch milliseconds, 07:00 UTC on the calendar day)."""
+    ms = int(dt.datetime(today.year, today.month, today.day, tzinfo=dt.timezone.utc).timestamp() * 1000)
+    q = urllib.parse.quote(f"authoringTemplate:event AND elements.endDate:[{ms} TO *]", safe="")
+    return f"{OHIO_ORG}/wps/odx-common/content/search/tourism.en?from={start}&size={size}&q={q}"
+
+def fetch_ohio_org(counties=None, keywords=None, exclude=None, today=None, get=_http_get, sleep=time.sleep, size=1000):
+    """Read ohio.org's event search (upcoming events only, one page of `size` at a time, a second apart) and propose the festival-like ones in the chosen
+    counties. The unfiltered search the site's pages use holds years of past events and stops at 5,000, so if the narrowed query is refused or returns
+    nothing, fall back to that plain request ('plain': True in the result: upcoming events may be missing).
+    Returns {'new','seen','total','outside','plain'}."""
+    counties = set(counties or MARKET_COUNTIES); today = today or dt.date.today(); con = db.connect(); hits, plain = [], False
+    try:
+        for start in range(0, 10000, size):
+            if start: sleep(1.0)
+            page = json.loads(get(ohio_org_url(today, start, size))); got = (page.get("hits") or {}).get("hits") or []
+            hits += got
+            if len(got) < size: break
+        if not hits: raise ValueError("no upcoming events returned")
+    except Exception:
+        plain = True; hits = (json.loads(get(OHIO_ORG_SEARCH)).get("hits") or {}).get("hits") or []
     new = seen = outside = 0
-    for e in parse_ohio_org(raw, keywords, exclude):
+    for e in parse_ohio_org({"hits": {"hits": hits}}, keywords, exclude):
         if e["end"] < today.isoformat(): continue
         county = county_for_zip(e["zip"])
         if county not in counties: outside += 1; continue
         seen += 1; new += db.upsert_candidate(con, "ohio_org", e["uid"], e["title"], e["start"], e["end"], e["city"], county, e["url"])
-    return {"new": new, "seen": seen, "total": total, "outside": outside}
+    return {"new": new, "seen": seen, "total": len(hits), "outside": outside, "plain": plain}
 
 # ------------------------------------------------------------------------------- iCal feeds
 def parse_ics(text):

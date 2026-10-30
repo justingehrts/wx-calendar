@@ -1,4 +1,4 @@
-import datetime as dt, io, json, os, re, threading
+import datetime as dt, io, json, os, re, threading, urllib.parse
 import pypdfium2 as pdfium
 from calendar_core import astro, db, ical, importers, milestones, patterns, preview, recurrence as rc, render_pdf as R
 
@@ -692,6 +692,43 @@ def test_tribe_events_connector_pages_filters_and_is_polite(con, monkeypatch):
     assert rg.fetch_tribe_events("cvb:t", "https://x.test", "Athens", today=dt.date(2026, 10, 30), get=get, sleep=lambda s: None)["new"] == 0       # idempotent
     assert rg.SOURCE_NAMES["cvb:athens"].startswith("Athens County Visitors Bureau")
 
+def _ohio_real_samples():
+    """Trimmed copies of five records from ohio.org's live search (2026-10-30): epoch-ms dates at 07:00 UTC, ZIP last in the address, taxonomy-path topics."""
+    rec = lambda i, name, title, s, e, addr, city, topics: {"_id": i, "_source": {"name": name, "title": title, "contentPath": "Ohio Content English/tourism/festivals-and-events/events/" + name,
+         "elements": {"startDate": s, "endDate": e, "address": addr, "cities": "Taxonomy/Topics/All Topics/Tourism/Cities/" + city,
+                      "topics": "|".join("Taxonomy/Topics/All Topics/Tourism/things-to-do/" + x for x in topics)}}}
+    return [rec("a", "national-road-yard-sale", "National Road Yard Sale", 1779951600000, 1780210800000, "8850 East Pike, Norwich, OH 43767", "Norwich", ["History & Heritage"]),
+            rec("b", "deck-the-hall", "Deck the Hall", 1733382000000, 1735455600000, "714 North Portage Path, Akron, OH 44303", "Akron", ["Arts & Cultural", "Fairs & Festivals"]),
+            rec("c", "clifton-gorge-music-arts-festival-2", "Clifton Gorge Music & Arts Festival", 1787900400000, 1787986800000, "100 North St (SR 343), Clifton, OH 45316", "Yellow Springs", ["Fairs & Festivals"]),
+            rec("d", "lilyfest", "Lilyfest", 1752217200000, 1752390000000, "Bishop Educational Gardens,  13200 Little Cola Road, Rockbridge, OH 43149", "Rockbridge", ["Nature & Outdoors", "Fairs & Festivals"]),
+            rec("e", "marion-county-historical-society-presentsdinner-with-the-presidents", "Marion County Historical Society Presents:Dinner with the Presidents",
+                1761980400000, 1761980400000, "6989 Waldo Delaware Rd, Waldo, OH 43302", "Marion", ["Family & Kids", "History & Heritage"])]
+
+def test_ohio_org_real_records_parse_and_filter(con, monkeypatch):
+    from calendar_core import regional as rg
+    monkeypatch.setattr(rg.db, "connect", lambda *a, **k: con)
+    got = {e["title"]: e for e in rg.parse_ohio_org({"hits": {"hits": _ohio_real_samples()}})}
+    assert set(got) == {"Deck the Hall", "Clifton Gorge Music & Arts Festival", "Lilyfest"}                 # yard sale and dinner have no festival word or topic
+    c = got["Clifton Gorge Music & Arts Festival"]; assert (c["start"], c["end"], c["zip"], c["city"]) == ("2026-08-28", "2026-08-29", "45316", "Yellow Springs")
+    assert got["Lilyfest"]["zip"] == "43149" and got["Lilyfest"]["start"] == "2025-07-11" and got["Lilyfest"]["end"] == "2025-07-13"
+    assert rg.county_for_zip("43149") == "Hocking" and rg.county_for_zip("43302") == "Marion" and rg.county_for_zip("43767") == "Muskingum"
+
+def test_ohio_org_fetch_pages_upcoming_only_and_falls_back(con, monkeypatch):
+    from calendar_core import regional as rg
+    monkeypatch.setattr(rg.db, "connect", lambda *a, **k: con)
+    recs = _ohio_real_samples(); mk = lambda hs: json.dumps({"hits": {"total": {"value": len(hs)}, "hits": hs}})
+    urls, sleeps = [], []
+    def narrowed(url):
+        urls.append(url); n = int(re.search(r"from=(\d+)", url)[1]); assert "elements.endDate" in urllib.parse.unquote(url)
+        return mk(recs[n:n + 2])                                                                         # pages of 2
+    r = rg.fetch_ohio_org(today=dt.date(2025, 1, 1), get=narrowed, sleep=sleeps.append, size=2)
+    assert len(urls) == 3 and sleeps == [1.0, 1.0] and r["total"] == 5 and not r["plain"]                  # 2 + 2 + 1 records, a pause between pages
+    assert (r["seen"], r["outside"], r["new"]) == (1, 1, 1)                  # Lilyfest (Hocking) kept; Clifton Gorge is Greene County; Deck the Hall ended in 2024
+    def refused(url):
+        if "elements.endDate" in urllib.parse.unquote(url): raise OSError("400")
+        return mk(recs)
+    r2 = rg.fetch_ohio_org(today=dt.date(2025, 1, 1), get=refused, sleep=lambda s: None)
+    assert r2["plain"] and r2["total"] == 5
 def _ohio_payload():
     ev = lambda i, t, path, s, e, addr, topics="": {"_id": i, "_source": {"title": t, "contentPath": "Ohio Content English/tourism/festivals-and-events/events/" + path,
          "elements": {"startDate": s, "endDate": e, "address": addr, "cities": "a/b/Columbus", "topics": topics}}}
