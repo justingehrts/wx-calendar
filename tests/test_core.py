@@ -1,4 +1,4 @@
-import datetime as dt, io, threading
+import datetime as dt, io, os, threading
 import pypdfium2 as pdfium
 from calendar_core import astro, db, ical, importers, milestones, patterns, preview, recurrence as rc, render_pdf as R
 
@@ -645,3 +645,31 @@ def test_candidates_are_reviewed_never_return_after_reject_and_accept_makes_a_re
     assert patterns.style_collisions(db.categories(con)) == []                                                             # the new category gets its own B&W style
     dup = {"title": "UTICA ice cream festival (updated)", "start_date": "2027-05-30", "end_date": "2027-05-30"}; assert [x["id"] for x in db.likely_duplicates(con, dup)] == [eid]
     pdf, _ = R.render(db.events(con), db.categories(con), 2027, [5], R.Options(bw=True, details_page=False)); assert _pages(pdf) == 1
+
+def test_oda_schedule_parsing_edge_cases():
+    from calendar_core import regional as rg
+    t = ("2026 Ohio Agricultural Fair Chronological Schedule\nWEEK OF JUNE 14\nPickaway County Fair (Circleville)* June 20-June 27\n"
+         "Fayette County Fair (Washington C.H.)* July 20-July 25\nOhio State Fair (Columbus)* July 29-August 9\nHartford Independent Fair (Licking Co.)* August 9-August 15\n"
+         "Richland County Fair*\t\t August 9-August 15\nCuyahoga County Fair (Berea) *\t August 11-August 16\nHighland County Fair (Hillsboro)\t Sept.6-Sept.12\n"
+         "Brown County Fair (Georgetown)\t Sept. 28-October 3\nGarbage Fair (Nowhere) Smarch 1-Smarch 2\nPickaway County Fair (Circleville)* June 20-June 27\n")
+    got = {r["title"]: r for r in rg.parse_oda_schedule(t)}
+    assert len(rg.parse_oda_schedule(t)) == 8                                                    # duplicate line and unreadable month dropped
+    assert (got["Pickaway County Fair"]["start"], got["Pickaway County Fair"]["end"], got["Pickaway County Fair"]["county"]) == ("2026-06-20", "2026-06-27", "Pickaway")
+    assert got["Fayette County Fair"]["city"] == "Washington C.H." and got["Ohio State Fair"]["county"] == "Franklin"
+    assert (got["Hartford Independent Fair"]["county"], got["Hartford Independent Fair"]["city"]) == ("Licking", "Hartford")
+    assert got["Richland County Fair"]["city"] == "" and got["Highland County Fair"]["end"] == "2026-09-12" and got["Brown County Fair"]["end"] == "2026-10-03"
+    try: rg.parse_oda_schedule("no heading here"); assert False
+    except ValueError: pass
+
+def test_oda_real_brochure_covers_all_22_counties_and_import_is_reviewed_not_added(con, monkeypatch):
+    from calendar_core import regional as rg
+    monkeypatch.setattr(rg.db, "connect", lambda *a, **k: con)
+    pdf = open(os.path.join(os.path.dirname(__file__), "..", "reference", "ohio_fair_schedule_2026.pdf"), "rb").read()
+    rows = rg.parse_oda_schedule(rg.pdf_text(pdf))
+    assert len(rows) == 95                                                                         # 87 county fairs + 7 independent + the State Fair
+    assert {r["county"] for r in rows} >= set(rg.MARKET_COUNTIES)
+    r = rg.fetch_oda_fairs(pdf, today=dt.date(2026, 1, 1)); assert (r["new"], r["seen"], r["total"], r["year"]) == (25, 25, 95, "2026")
+    assert rg.fetch_oda_fairs(pdf, today=dt.date(2026, 1, 1))["new"] == 0                          # idempotent
+    assert any(c["title"] == "Ohio State Fair" and c["county"] == "Franklin" for c in rg.db.candidates(con, "new")) and not rg.db.events(con)
+    late = rg.fetch_oda_fairs(pdf, ["Fairfield"], today=dt.date(2026, 10, 18)); assert late["seen"] == 0   # Fairfield ended Oct 17: nothing to propose
+    assert rg.fetch_oda_fairs(pdf, ["Fairfield"], today=dt.date(2026, 10, 18), include_past=True)["seen"] == 1

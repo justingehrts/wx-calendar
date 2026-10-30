@@ -278,6 +278,15 @@ with tab_reg:
     counties = st.multiselect("Counties to include", regional.MARKET_COUNTIES, [c for c in saved if c in regional.MARKET_COUNTIES])
     if counties != saved: db.set_setting(con, "market_counties", counties)
     with st.expander("Sources"):
+        st.markdown("**Ohio Department of Agriculture fair schedule** (the official brochure PDF: Ohio State Fair, county fairs and independent fairs). "
+                    "Upload the year's brochure from agri.ohio.gov; a copy of the 2026 one is bundled.")
+        up = st.file_uploader("Fair schedule brochure (PDF)", type="pdf", key="oda_pdf"); past = st.checkbox("Include fairs that are already over", False)
+        if st.button("Read the fair schedule"):
+            try:
+                pdf = up.getvalue() if up else open(os.path.join(os.path.dirname(__file__), "reference", "ohio_fair_schedule_2026.pdf"), "rb").read()
+                r = regional.fetch_oda_fairs(pdf, counties, include_past=past)
+                st.success(f"{r['year']} schedule: {r['total']} fairs listed; {r['new']} new proposal(s), {r['seen']} in your counties" + ("" if past else " that are still to come") + ".")
+            except Exception as ex: st.error(f"Could not read the fair schedule: {ex}")
         st.markdown("**Experience Columbus** (public event pages; the site has no calendar feed, so pages are read politely: 2 seconds apart, as its robots.txt asks, and cached).")
         kws = st.text_input("Festival-like words in the event's web address", ", ".join(db.get_setting(con, "ec_keywords", regional.DEFAULT_KEYWORDS)))
         exs = st.text_input("Skip addresses containing", ", ".join(db.get_setting(con, "ec_exclude", regional.DEFAULT_EXCLUDE)))
@@ -302,7 +311,6 @@ with tab_reg:
             for i, fd in enumerate(feeds):
                 try: r = regional.fetch_ics(f"ics:{fd['url']}", fd["url"], fd.get("county")); st.write(f"{fd['name']}: {r['new']} new of {r['seen']} upcoming")
                 except Exception as ex: st.error(f"{fd['name']}: {ex}")
-        st.caption("Planned: the Ohio Department of Agriculture's official county-fair schedule and county visitors-bureau calendars, once the app can reach them.")
     cands = [c for c in db.candidates(con, "new") if (c["county"] in counties or not c["county"])]
     if not cands: st.info("Nothing waiting for review. Use Sources above to fetch events.")
     else:

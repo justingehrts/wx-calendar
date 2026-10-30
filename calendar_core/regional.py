@@ -3,6 +3,8 @@
 automatically, and a rejected candidate never comes back.
 
 Connectors:
+  * Ohio Department of Agriculture (ODA): the official "Ohio Agricultural Fair Chronological Schedule" brochure (PDF, published each December):
+    the Ohio State Fair, every county fair and the independent fairs, with dates. Read from the PDF with pypdfium2.
   * Experience Columbus: public event pages found through the site's sitemap (robots.txt allows it with a 2-second crawl delay, which
     we honor). The site has no calendar feed or open API, so this reads the same pages a visitor sees.
   * iCal (.ics) feeds: any visitors bureau / fairground that publishes one."""
@@ -80,6 +82,57 @@ def fetch_experience_columbus(counties=None, keywords=None, exclude=None, progre
         new += db.upsert_candidate(con, "experience_columbus", u, c["title"], c["start"], c["end"], c["city"], county, u)
     return {"new": new, "seen": seen, "pages_read": read, "outside": outside, "remaining": max(0, len(todo) - max_pages)}
 
+# ------------------------------------------------------------------ Ohio Department of Agriculture
+ODA_BROCHURE = "https://agri.ohio.gov/"       # candidates link here; the brochure PDF address changes every year and is not fetched by the app
+_MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+_ODA_LINE = re.compile(r"^(?P<name>[A-Z][A-Za-z.' -]*?(?:County Fair|Independent Fair|State Fair))\s*(?:\((?P<loc>[^)]*)\))?\s*\*?\s*"
+                       r"(?P<sm>[A-Za-z]{3,9})\.?\s*(?P<sd>\d{1,2})\s*-\s*(?P<em>[A-Za-z]{3,9})\.?\s*(?P<ed>\d{1,2})\s*$")
+
+def pdf_text(data):
+    """Plain text of a PDF (bytes), one line per printed line."""
+    import pypdfium2
+    doc = pypdfium2.PdfDocument(data)
+    try: return "\n".join(pg.get_textpage().get_text_range() for pg in doc).replace("\r\n", "\n")
+    finally: doc.close()
+
+def parse_oda_schedule(text, year=None):
+    """The ODA chronological schedule -> [{uid, title, start, end, city, county}]. A line looks like 'Pickaway County Fair (Circleville)* June 20-June 27'
+    (the * marks harness racing and is ignored). The year comes from the brochure's heading ('2026 Ohio Agricultural Fair ...') unless given.
+    County fairs get their county from the name, independent fairs from '(Licking Co.)', and the Ohio State Fair is Franklin County."""
+    if year is None:
+        m = re.search(r"(20\d\d)\s+Ohio Agricultural Fair", text)
+        if not m: raise ValueError("cannot find the schedule year; pass year=")
+        year = int(m[1])
+    out, seen = [], set()
+    for ln in text.splitlines():
+        m = _ODA_LINE.match(ln.strip().replace("\t", " "))
+        if not m: continue
+        sm, em = _MONTHS.get(m["sm"][:3].lower()), _MONTHS.get(m["em"][:3].lower())
+        if not sm or not em: continue
+        try: start, end = dt.date(year, sm, int(m["sd"])), dt.date(year, em, int(m["ed"]))
+        except ValueError: continue
+        if end < start: continue
+        name, loc = " ".join(m["name"].split()), (m["loc"] or "").strip()
+        if name == "Ohio State Fair": county, city = "Franklin", loc or "Columbus"
+        elif name.endswith("County Fair"): county, city = name[:-len(" County Fair")], loc
+        else: county, city = (re.sub(r"\s*Co\.?$", "", loc) or None), name.split()[0]           # 'Hartford Independent Fair (Licking Co.)'
+        uid = f"{name}|{year}"
+        if uid in seen: continue
+        seen.add(uid); out.append({"uid": uid, "title": name, "start": start.isoformat(), "end": end.isoformat(), "city": city, "county": county})
+    return out
+
+def fetch_oda_fairs(pdf, counties=None, today=None, include_past=False, url=None):
+    """Store the schedule's fairs in the chosen counties as candidates. `pdf` is the brochure's bytes. Fairs already over are left out unless
+    include_past. Returns {'new', 'seen', 'outside', 'total', 'year'}."""
+    counties = set(counties or MARKET_COUNTIES); today = today or dt.date.today(); con = db.connect()
+    rows = parse_oda_schedule(pdf_text(pdf)); new = seen = outside = 0
+    for r in rows:
+        if r["county"] not in counties: outside += 1; continue
+        if r["end"] < today.isoformat() and not include_past: continue
+        seen += 1
+        new += db.upsert_candidate(con, "oda_fairs", r["uid"], r["title"], r["start"], r["end"], r["city"], r["county"], url or ODA_BROCHURE)
+    return {"new": new, "seen": seen, "outside": outside, "total": len(rows), "year": rows[0]["start"][:4] if rows else None}
+
 # ------------------------------------------------------------------------------- iCal feeds
 def parse_ics(text):
     """Minimal iCalendar reader: VEVENTs -> [{uid, title, start, end (inclusive), location, url}]. All-day DTEND is exclusive in iCal, so one day is
@@ -134,4 +187,4 @@ def accept(con, cand_id):
     eid = db.add_event(con, c["title"], c["start_date"], c["end_date"], cat, location=where, notes=notes, url=c["url"], flag="confirm dates")
     db.decide_candidate(con, cand_id, "accepted", eid); return eid
 
-SOURCE_NAMES = {"experience_columbus": "Experience Columbus (event pages)"}
+SOURCE_NAMES = {"experience_columbus": "Experience Columbus (event pages)", "oda_fairs": "Ohio Department of Agriculture fair schedule"}
