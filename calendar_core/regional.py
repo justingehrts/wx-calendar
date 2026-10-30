@@ -9,6 +9,9 @@ Connectors:
     we honor). The site has no calendar feed or open API, so this reads the same pages a visitor sees.
   * Visitors-bureau event APIs: sites running The Events Calendar (WordPress) publish their events as JSON at /wp-json/tribe/events/v1/events.
     Athens County is the one bureau in the 22 counties found with real published event data (see CVB_SOURCES).
+  * ohio.org (TourismOhio): its Festivals & Events pages load every event from one public JSON search (the same request the page makes; robots.txt
+    does not cover it). One request, then counties come from the ZIP in each event's address. Written from the page's own script, so the exact
+    response shape is an assumption that has not been run against the live site (ohio.org refuses automated requests from some networks).
   * iCal (.ics) feeds: any visitors bureau / fairground that publishes one."""
 import datetime as dt, html, json, re, time, urllib.request
 from . import db, store
@@ -162,6 +165,54 @@ def fetch_tribe_events(source_id, base_url, county, keywords=None, exclude=None,
         page += 1
     return {"new": new, "seen": seen, "total": total, "skipped": skipped}
 
+# ------------------------------------------------------------------------------------------- ohio.org
+OHIO_ORG = "https://ohio.org"
+OHIO_ORG_SEARCH = OHIO_ORG + "/wps/odx-common/content/search/tourism.en?from=0&size=5000&q=authoringTemplate%3Aevent"
+
+def _ohio_date(v):
+    """Event date from ohio.org's startDate/endDate: epoch milliseconds or an ISO string. Its times of day are unreliable placeholders (02:00-03:00),
+    so only the date is used: the UTC date of an epoch, or the date part of a string."""
+    if isinstance(v, (int, float)) or (isinstance(v, str) and v.strip().isdigit()):
+        return dt.datetime.fromtimestamp(float(v) / 1000, dt.timezone.utc).date().isoformat()
+    m = re.match(r"(\d{4}-\d{2}-\d{2})", str(v or ""))
+    return m[1] if m else None
+
+def parse_ohio_org(data, keywords=None, exclude=None):
+    """ohio.org search JSON (or its text) -> [{uid, title, start, end, city, zip, url, topics}] for festival-like events. An event is kept when its web
+    address or title contains a festival word, or its topics include 'fairs' or 'festivals'; exclusion words always win. Events with no readable dates or
+    no ZIP in the address are dropped."""
+    if isinstance(data, str):
+        try: data = json.loads(data)
+        except ValueError: raise ValueError("ohio.org did not return event data (it may be refusing automated requests)")
+    kw = [k.lower() for k in (keywords or DEFAULT_KEYWORDS)]; ex = [x.lower() for x in (DEFAULT_EXCLUDE if exclude is None else exclude)]
+    out = []
+    for h in ((data.get("hits") or {}).get("hits") or []):
+        src = h.get("_source") or {}; el = src.get("elements") or {}
+        title = html.unescape(src.get("title") or "").strip(); path = src.get("contentPath") or ""
+        start, end = _ohio_date(el.get("startDate")), _ohio_date(el.get("endDate"))
+        z = re.search(r"\b(\d{5})(?:-\d{4})?\s*$", (el.get("address") or "").strip())
+        if not (title and start and z): continue
+        topics = " ".join(t.rsplit("/", 1)[-1] for t in (el.get("topics") or "").split("|")).lower()
+        slug = path.rstrip("/").rsplit("/", 1)[-1].lower(); hay = slug + " " + title.lower().replace(" ", "-")
+        if any(x in hay for x in ex) or not (any(k in hay for k in kw) or "fair" in topics or "festival" in topics): continue
+        tail = path.split("/tourism/", 1)[1] if "/tourism/" in path else ""
+        city = (el.get("cities") or "").split("|")[0].rsplit("/", 1)[-1]
+        out.append({"uid": h.get("_id") or path or title, "title": title, "start": start, "end": max(end or start, start), "city": city, "zip": z[1],
+                    "url": f"{OHIO_ORG}/{tail}" if tail else OHIO_ORG, "topics": topics})
+    return out
+
+def fetch_ohio_org(counties=None, keywords=None, exclude=None, today=None, get=_http_get):
+    """One request to ohio.org's event search; festival-like events in the chosen counties become candidates. Returns {'new','seen','total','outside'}."""
+    counties = set(counties or MARKET_COUNTIES); today = today or dt.date.today(); con = db.connect()
+    raw = get(OHIO_ORG_SEARCH); total = len(((json.loads(raw).get("hits") or {}).get("hits") or [])) if raw.lstrip().startswith("{") else 0
+    new = seen = outside = 0
+    for e in parse_ohio_org(raw, keywords, exclude):
+        if e["end"] < today.isoformat(): continue
+        county = county_for_zip(e["zip"])
+        if county not in counties: outside += 1; continue
+        seen += 1; new += db.upsert_candidate(con, "ohio_org", e["uid"], e["title"], e["start"], e["end"], e["city"], county, e["url"])
+    return {"new": new, "seen": seen, "total": total, "outside": outside}
+
 # ------------------------------------------------------------------------------- iCal feeds
 def parse_ics(text):
     """Minimal iCalendar reader: VEVENTs -> [{uid, title, start, end (inclusive), location, url}]. All-day DTEND is exclusive in iCal, so one day is
@@ -216,5 +267,5 @@ def accept(con, cand_id):
     eid = db.add_event(con, c["title"], c["start_date"], c["end_date"], cat, location=where, notes=notes, url=c["url"], flag="confirm dates")
     db.decide_candidate(con, cand_id, "accepted", eid); return eid
 
-SOURCE_NAMES = {"experience_columbus": "Experience Columbus (event pages)", "oda_fairs": "Ohio Department of Agriculture fair schedule"}
+SOURCE_NAMES = {"experience_columbus": "Experience Columbus (event pages)", "oda_fairs": "Ohio Department of Agriculture fair schedule", "ohio_org": "ohio.org (TourismOhio)"}
 SOURCE_NAMES.update({c["id"]: c["name"] + " (event calendar)" for c in CVB_SOURCES})

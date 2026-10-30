@@ -691,3 +691,31 @@ def test_tribe_events_connector_pages_filters_and_is_polite(con, monkeypatch):
     assert set(c) == {"Honey for the Heart Parade", "Ohio Pawpaw Festival & Fair"} and c["Honey for the Heart Parade"]["county"] == "Athens" and c["Honey for the Heart Parade"]["city"] == "Nelsonville"
     assert rg.fetch_tribe_events("cvb:t", "https://x.test", "Athens", today=dt.date(2026, 10, 30), get=get, sleep=lambda s: None)["new"] == 0       # idempotent
     assert rg.SOURCE_NAMES["cvb:athens"].startswith("Athens County Visitors Bureau")
+
+def _ohio_payload():
+    ev = lambda i, t, path, s, e, addr, topics="": {"_id": i, "_source": {"title": t, "contentPath": "Ohio Content English/tourism/festivals-and-events/events/" + path,
+         "elements": {"startDate": s, "endDate": e, "address": addr, "cities": "a/b/Columbus", "topics": topics}}}
+    return {"hits": {"hits": [
+        ev("1", "Columbus Arts Festival", "columbus-arts-festival-4", "2027-06-11T03:00:00", "2027-06-13T03:00:00", "248 W Main St., Columbus, OH 43215"),
+        ev("2", "WinterFest Columbus", "winterfest-columbus", "2026-11-21T02:00:00", "2026-11-21T02:00:00", "50 S. Belle St., Columbus, OH 43215"),
+        ev("3", "Pickaway Gathering", "pickaway-gathering", 1812585600000, 1812585600000, "1 Main St., Circleville, OH 43113", "x/fairs-festivals"),   # topic match, epoch ms
+        ev("4", "Toledo Festival", "toledo-festival", "2027-05-01T03:00:00", "2027-05-01T03:00:00", "1 Summit St., Toledo, OH 43604"),                  # other county
+        ev("5", "Quilt Workshop", "quilt-workshop", "2027-03-01T03:00:00", "2027-03-01T03:00:00", "5 Elm St., Columbus, OH 43215"),                    # no festival word
+        ev("6", "Yoga Fest", "yoga-fest", "2027-03-02T03:00:00", "2027-03-02T03:00:00", "5 Elm St., Columbus, OH 43215"),                              # excluded word
+        ev("7", "No Zip Fair", "no-zip-fair", "2027-03-03T03:00:00", "2027-03-03T03:00:00", "Somewhere in Ohio"),                                       # unreadable address
+        ev("8", "Old Festival", "old-festival", "2026-01-03T03:00:00", "2026-01-04T03:00:00", "5 Elm St., Columbus, OH 43215")]}}
+
+def test_ohio_org_parse_and_fetch(con, monkeypatch):
+    from calendar_core import regional as rg
+    monkeypatch.setattr(rg.db, "connect", lambda *a, **k: con)
+    got = {e["title"]: e for e in rg.parse_ohio_org(_ohio_payload())}
+    assert set(got) == {"Columbus Arts Festival", "WinterFest Columbus", "Pickaway Gathering", "Toledo Festival", "Old Festival"}
+    a = got["Columbus Arts Festival"]; assert (a["start"], a["end"], a["zip"], a["city"]) == ("2027-06-11", "2027-06-13", "43215", "Columbus")
+    assert a["url"] == "https://ohio.org/festivals-and-events/events/columbus-arts-festival-4"
+    w = got["WinterFest Columbus"]; assert w["start"] == w["end"] == "2026-11-21"                      # one day; the weekly hours table on the page is ignored
+    assert got["Pickaway Gathering"]["start"] == "2027-06-10"                                         # epoch ms read as a UTC date
+    r = rg.fetch_ohio_org(today=dt.date(2026, 10, 30), get=lambda url: json.dumps(_ohio_payload()))
+    assert (r["new"], r["seen"], r["outside"], r["total"]) == (3, 3, 1, 8)                            # Arts Festival, WinterFest, Pickaway kept; Toledo outside; Old Festival over
+    assert rg.fetch_ohio_org(today=dt.date(2026, 10, 30), get=lambda url: json.dumps(_ohio_payload()))["new"] == 0
+    try: rg.parse_ohio_org("<html>404 Error Page</html>"); assert False
+    except ValueError as ex: assert "ohio.org" in str(ex)

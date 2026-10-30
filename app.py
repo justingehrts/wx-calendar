@@ -294,6 +294,12 @@ with tab_reg:
                     r = regional.fetch_tribe_events(cv["id"], cv["url"], cv["county"], delay=cv["delay"], keywords=db.get_setting(con, "ec_keywords", regional.DEFAULT_KEYWORDS), exclude=db.get_setting(con, "ec_exclude", regional.DEFAULT_EXCLUDE))
                     st.success(f"{cv['name']}: {r['new']} new proposal(s); {r['seen']} festival-like of {r['total']} upcoming events.")
                 except Exception as ex: st.error(f"{cv['name']}: {ex}")
+        st.markdown("**ohio.org Festivals & Events** (TourismOhio; one request to the same event search the site's own page uses, then your counties and the festival-like words below).")
+        if st.button("Fetch events from ohio.org"):
+            try:
+                r = regional.fetch_ohio_org(counties, db.get_setting(con, "ec_keywords", regional.DEFAULT_KEYWORDS), db.get_setting(con, "ec_exclude", regional.DEFAULT_EXCLUDE))
+                st.success(f"{r['new']} new proposal(s); {r['seen']} festival-like upcoming event(s) in your counties of {r['total']} listed" + (f"; {r['outside']} in other counties skipped" if r["outside"] else "") + ".")
+            except Exception as ex: st.error(f"Could not read ohio.org: {ex}")
         st.markdown("**Experience Columbus** (public event pages; the site has no calendar feed, so pages are read politely: 2 seconds apart, as its robots.txt asks, and cached).")
         kws = st.text_input("Festival-like words in the event's web address", ", ".join(db.get_setting(con, "ec_keywords", regional.DEFAULT_KEYWORDS)))
         exs = st.text_input("Skip addresses containing", ", ".join(db.get_setting(con, "ec_exclude", regional.DEFAULT_EXCLUDE)))
