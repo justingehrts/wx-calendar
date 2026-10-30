@@ -708,25 +708,47 @@ def test_ohio_org_real_records_parse_and_filter(con, monkeypatch):
     from calendar_core import regional as rg
     monkeypatch.setattr(rg.db, "connect", lambda *a, **k: con)
     got = {e["title"]: e for e in rg.parse_ohio_org({"hits": {"hits": _ohio_real_samples()}})}
-    assert set(got) == {"Deck the Hall", "Clifton Gorge Music & Arts Festival", "Lilyfest"}                 # yard sale and dinner have no festival word or topic
+    assert set(got) == {"Clifton Gorge Music & Arts Festival", "Lilyfest"}       # yard sale and dinner have no festival word or topic; Deck the Hall runs 24 days (over the 21-day limit)
     c = got["Clifton Gorge Music & Arts Festival"]; assert (c["start"], c["end"], c["zip"], c["city"]) == ("2026-08-28", "2026-08-29", "45316", "Yellow Springs")
     assert got["Lilyfest"]["zip"] == "43149" and got["Lilyfest"]["start"] == "2025-07-11" and got["Lilyfest"]["end"] == "2025-07-13"
     assert rg.county_for_zip("43149") == "Hocking" and rg.county_for_zip("43302") == "Marion" and rg.county_for_zip("43767") == "Muskingum"
 
-def test_ohio_org_fetch_pages_the_plain_list_and_reports_the_cap(con, monkeypatch):
+def test_ohio_org_fetch_reads_newest_end_dates_first_and_stops_at_the_past(con, monkeypatch):
+    import copy
     from calendar_core import regional as rg
     monkeypatch.setattr(rg.db, "connect", lambda *a, **k: con)
-    recs = _ohio_real_samples(); mk = lambda hs: json.dumps({"hits": {"total": {"value": 10000, "relation": "gte"}, "hits": hs}})
+    ms = lambda y, m, d: int(dt.datetime(y, m, d, 7, tzinfo=dt.timezone.utc).timestamp() * 1000)
+    recs = _ohio_real_samples()
+    soon = copy.deepcopy(recs[3]); soon["_id"] = "f"; soon["_source"]["title"] = "Lilyfest 2026"                    # Hocking County, still to come
+    soon["_source"]["elements"]["startDate"], soon["_source"]["elements"]["endDate"] = ms(2026, 11, 14), ms(2026, 11, 15)
+    forever = copy.deepcopy(recs[2]); forever["_id"] = "g"; forever["_source"]["title"] = "Bell Farms Festival Grill"       # a standing listing: ends decades from now
+    forever["_source"]["elements"].update(startDate=ms(2021, 10, 21), endDate=ms(2048, 1, 1), address="59 East Water Street, Chillicothe, OH 45601")
+    allrecs = recs + [soon, forever]
+    order = sorted(allrecs, key=lambda r: r["_source"]["elements"]["endDate"], reverse=True)
+    for r in order: r["sort"] = [r["_source"]["elements"]["endDate"]]
     urls, sleeps = [], []
-    def plain(url):
-        urls.append(url); n = int(re.search(r"from=(\d+)", url)[1]); return mk(recs[n:n + 2])               # pages of 2
-    r = rg.fetch_ohio_org(today=dt.date(2025, 1, 1), get=plain, sleep=sleeps.append, size=2)
-    assert len(urls) == 3 and sleeps == [1.0, 1.0] and r["total"] == 5 and not r["capped"]
-    assert all("q=authoringTemplate%3Aevent" in u and "endDate" not in u for u in urls)                  # no date filter: the site returns a 500 for those
-    assert (r["seen"], r["outside"], r["new"]) == (1, 1, 1)                  # Lilyfest (Hocking) kept; Clifton Gorge is Greene County; Deck the Hall ended in 2024
-    monkeypatch.setattr(rg, "OHIO_ORG_LIMIT", 4)
-    assert rg.fetch_ohio_org(today=dt.date(2025, 1, 1), get=plain, sleep=lambda s: None, size=2)["capped"]  # reached the limit with full pages: newest may be missing
+    def site(url):
+        urls.append(url); n = int(re.search(r"from=(\d+)", url)[1]); return json.dumps({"hits": {"total": {"value": 10000, "relation": "gte"}, "hits": order[n:n + 2]}})
+    r = rg.fetch_ohio_org(today=dt.date(2026, 10, 30), get=site, sleep=sleeps.append, size=2)
+    assert all("sort=elements.endDate%3Adesc" in u and "q=authoringTemplate%3Aevent&" in u and "%20AND%20" not in u for u in urls)      # sort only: no date filter
+    assert len(urls) == 2 and sleeps == [1.0] and r["total"] == 4 and not r["capped"]                  # stopped once a page reached events already over (not all 7 records read)
+    assert (r["seen"], r["new"]) == (1, 1) and [c["title"] for c in rg.db.candidates(con, "new")] == ["Lilyfest 2026"]   # the 2048 'festival' listing was dropped
+    assert r["outside"] == 0                                                                           # Clifton Gorge (Greene County) ended in August, so it is skipped first
 
+def test_ohio_org_fetch_reports_when_the_site_ignores_sort_and_hits_its_limit(con, monkeypatch):
+    from calendar_core import regional as rg
+    monkeypatch.setattr(rg.db, "connect", lambda *a, **k: con); monkeypatch.setattr(rg, "OHIO_ORG_LIMIT", 4)
+    recs = _ohio_real_samples()                                                                           # no 'sort' values: the site ignored the parameter
+    get = lambda url: json.dumps({"hits": {"hits": recs[int(re.search(r"from=(\d+)", url)[1]):][:2]}})
+    assert rg.fetch_ohio_org(today=dt.date(2025, 1, 1), get=get, sleep=lambda s: None, size=2)["capped"]    # full pages up to the limit: newest may be missing
+    monkeypatch.setattr(rg, "OHIO_ORG_LIMIT", 10000)
+    assert not rg.fetch_ohio_org(today=dt.date(2025, 1, 1), get=get, sleep=lambda s: None, size=2)["capped"]  # a short last page: the whole list was read
+
+def test_ohio_org_drops_standing_listings():
+    from calendar_core import regional as rg
+    recs = _ohio_real_samples(); r = recs[2]; r["_source"]["elements"]["endDate"] = 3241148400000                  # ends in 2072
+    assert rg.parse_ohio_org({"hits": {"hits": [r]}}) == []
+    assert [e["title"] for e in rg.parse_ohio_org({"hits": {"hits": [recs[2]]}}, max_days=100000)] == ["Clifton Gorge Music & Arts Festival"]
 def _ohio_payload():
     ev = lambda i, t, path, s, e, addr, topics="": {"_id": i, "_source": {"title": t, "contentPath": "Ohio Content English/tourism/festivals-and-events/events/" + path,
          "elements": {"startDate": s, "endDate": e, "address": addr, "cities": "a/b/Columbus", "topics": topics}}}
