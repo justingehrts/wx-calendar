@@ -726,9 +726,9 @@ def test_ohio_org_fetch_pages_upcoming_only_and_falls_back(con, monkeypatch):
     assert (r["seen"], r["outside"], r["new"]) == (1, 1, 1)                  # Lilyfest (Hocking) kept; Clifton Gorge is Greene County; Deck the Hall ended in 2024
     def refused(url):
         if "elements.endDate" in urllib.parse.unquote(url): raise OSError("400")
-        return mk(recs)
-    r2 = rg.fetch_ohio_org(today=dt.date(2025, 1, 1), get=refused, sleep=lambda s: None)
-    assert r2["plain"] and r2["total"] == 5
+        urls.append(url); n = int(re.search(r"from=(\d+)", url)[1]); return mk(recs[n:n + 2])
+    urls.clear(); r2 = rg.fetch_ohio_org(today=dt.date(2025, 1, 1), get=refused, sleep=lambda s: None, size=2)
+    assert r2["plain"] and r2["total"] == 5 and len(urls) == 3 and all("q=authoringTemplate%3Aevent" in u and "endDate" not in u for u in urls)
 def _ohio_payload():
     ev = lambda i, t, path, s, e, addr, topics="": {"_id": i, "_source": {"title": t, "contentPath": "Ohio Content English/tourism/festivals-and-events/events/" + path,
          "elements": {"startDate": s, "endDate": e, "address": addr, "cities": "a/b/Columbus", "topics": topics}}}

@@ -210,7 +210,7 @@ def ohio_org_url(today, start=0, size=1000):
 def fetch_ohio_org(counties=None, keywords=None, exclude=None, today=None, get=_http_get, sleep=time.sleep, size=1000):
     """Read ohio.org's event search (upcoming events only, one page of `size` at a time, a second apart) and propose the festival-like ones in the chosen
     counties. The unfiltered search the site's pages use holds years of past events and stops at 5,000, so if the narrowed query is refused or returns
-    nothing, fall back to that plain request ('plain': True in the result: upcoming events may be missing).
+    nothing, page through the plain list instead ('plain': True in the result; that list is mostly past events and the site stops it at 10,000, so some upcoming events may be missing).
     Returns {'new','seen','total','outside','plain'}."""
     counties = set(counties or MARKET_COUNTIES); today = today or dt.date.today(); con = db.connect(); hits, plain = [], False
     try:
@@ -221,7 +221,12 @@ def fetch_ohio_org(counties=None, keywords=None, exclude=None, today=None, get=_
             if len(got) < size: break
         if not hits: raise ValueError("no upcoming events returned")
     except Exception:
-        plain = True; hits = (json.loads(get(OHIO_ORG_SEARCH)).get("hits") or {}).get("hits") or []
+        plain = True; hits = []                      # the narrowed query was refused: page through the plain list instead (same from/size the site's own page uses)
+        for start in range(0, 10000, size):
+            if start: sleep(1.0)
+            got = (json.loads(get(OHIO_ORG_SEARCH.replace("from=0&size=5000", f"from={start}&size={size}"))).get("hits") or {}).get("hits") or []
+            hits += got
+            if len(got) < size: break
     new = seen = outside = 0
     for e in parse_ohio_org({"hits": {"hits": hits}}, keywords, exclude):
         if e["end"] < today.isoformat(): continue
