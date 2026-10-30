@@ -713,22 +713,20 @@ def test_ohio_org_real_records_parse_and_filter(con, monkeypatch):
     assert got["Lilyfest"]["zip"] == "43149" and got["Lilyfest"]["start"] == "2025-07-11" and got["Lilyfest"]["end"] == "2025-07-13"
     assert rg.county_for_zip("43149") == "Hocking" and rg.county_for_zip("43302") == "Marion" and rg.county_for_zip("43767") == "Muskingum"
 
-def test_ohio_org_fetch_pages_upcoming_only_and_falls_back(con, monkeypatch):
+def test_ohio_org_fetch_pages_the_plain_list_and_reports_the_cap(con, monkeypatch):
     from calendar_core import regional as rg
     monkeypatch.setattr(rg.db, "connect", lambda *a, **k: con)
-    recs = _ohio_real_samples(); mk = lambda hs: json.dumps({"hits": {"total": {"value": len(hs)}, "hits": hs}})
+    recs = _ohio_real_samples(); mk = lambda hs: json.dumps({"hits": {"total": {"value": 10000, "relation": "gte"}, "hits": hs}})
     urls, sleeps = [], []
-    def narrowed(url):
-        urls.append(url); n = int(re.search(r"from=(\d+)", url)[1]); assert "elements.endDate" in urllib.parse.unquote(url)
-        return mk(recs[n:n + 2])                                                                         # pages of 2
-    r = rg.fetch_ohio_org(today=dt.date(2025, 1, 1), get=narrowed, sleep=sleeps.append, size=2)
-    assert len(urls) == 3 and sleeps == [1.0, 1.0] and r["total"] == 5 and not r["plain"]                  # 2 + 2 + 1 records, a pause between pages
+    def plain(url):
+        urls.append(url); n = int(re.search(r"from=(\d+)", url)[1]); return mk(recs[n:n + 2])               # pages of 2
+    r = rg.fetch_ohio_org(today=dt.date(2025, 1, 1), get=plain, sleep=sleeps.append, size=2)
+    assert len(urls) == 3 and sleeps == [1.0, 1.0] and r["total"] == 5 and not r["capped"]
+    assert all("q=authoringTemplate%3Aevent" in u and "endDate" not in u for u in urls)                  # no date filter: the site returns a 500 for those
     assert (r["seen"], r["outside"], r["new"]) == (1, 1, 1)                  # Lilyfest (Hocking) kept; Clifton Gorge is Greene County; Deck the Hall ended in 2024
-    def refused(url):
-        if "elements.endDate" in urllib.parse.unquote(url): raise OSError("400")
-        urls.append(url); n = int(re.search(r"from=(\d+)", url)[1]); return mk(recs[n:n + 2])
-    urls.clear(); r2 = rg.fetch_ohio_org(today=dt.date(2025, 1, 1), get=refused, sleep=lambda s: None, size=2)
-    assert r2["plain"] and r2["total"] == 5 and len(urls) == 3 and all("q=authoringTemplate%3Aevent" in u and "endDate" not in u for u in urls)
+    monkeypatch.setattr(rg, "OHIO_ORG_LIMIT", 4)
+    assert rg.fetch_ohio_org(today=dt.date(2025, 1, 1), get=plain, sleep=lambda s: None, size=2)["capped"]  # reached the limit with full pages: newest may be missing
+
 def _ohio_payload():
     ev = lambda i, t, path, s, e, addr, topics="": {"_id": i, "_source": {"title": t, "contentPath": "Ohio Content English/tourism/festivals-and-events/events/" + path,
          "elements": {"startDate": s, "endDate": e, "address": addr, "cities": "a/b/Columbus", "topics": topics}}}

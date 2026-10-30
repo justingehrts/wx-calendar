@@ -299,7 +299,7 @@ with tab_reg:
             try:
                 r = regional.fetch_ohio_org(counties, db.get_setting(con, "ec_keywords", regional.DEFAULT_KEYWORDS), db.get_setting(con, "ec_exclude", regional.DEFAULT_EXCLUDE))
                 st.success(f"{r['new']} new proposal(s); {r['seen']} festival-like upcoming event(s) in your counties of {r['total']} listed" + (f"; {r['outside']} in other counties skipped" if r["outside"] else "") + "."
-                           + (" (The site refused the upcoming-only search, so this used its plain list, which may miss some upcoming events.)" if r["plain"] else ""))
+                           + (" The site's list reached its 10,000-event limit, so the newest events may be missing." if r["capped"] else ""))
             except Exception as ex: st.error(f"Could not read ohio.org: {ex}")
         st.markdown("**Experience Columbus** (public event pages; the site has no calendar feed, so pages are read politely: 2 seconds apart, as its robots.txt asks, and cached).")
         kws = st.text_input("Festival-like words in the event's web address", ", ".join(db.get_setting(con, "ec_keywords", regional.DEFAULT_KEYWORDS)))
