@@ -7,13 +7,8 @@ Connectors:
     the Ohio State Fair, every county fair and the independent fairs, with dates. Read from the PDF with pypdfium2.
   * Experience Columbus: public event pages found through the site's sitemap (robots.txt allows it with a 2-second crawl delay, which
     we honor). The site has no calendar feed or open API, so this reads the same pages a visitor sees.
-  * Visitors-bureau event APIs: sites running The Events Calendar (WordPress) publish their events as JSON at /wp-json/tribe/events/v1/events.
-    Athens County is the one bureau in the 22 counties found with real published event data (see CVB_SOURCES).
-  * ohio.org (TourismOhio): its Festivals & Events pages load every event from one public JSON search (the same request the page makes; robots.txt
-    does not cover it). One request, then counties come from the ZIP in each event's address. Written from the page's own script, so the exact
-    response shape is an assumption that has not been run against the live site (ohio.org refuses automated requests from some networks).
   * iCal (.ics) feeds: any visitors bureau / fairground that publishes one."""
-import datetime as dt, html, json, re, time, urllib.parse, urllib.request
+import datetime as dt, html, json, re, time, urllib.request
 from . import db, store
 
 UA = "wx-calendar/1.0 (TV weather planning calendar; polite, cached)"
@@ -138,100 +133,6 @@ def fetch_oda_fairs(pdf, counties=None, today=None, include_past=False, url=None
         new += db.upsert_candidate(con, "oda_fairs", r["uid"], r["title"], r["start"], r["end"], r["city"], r["county"], url or ODA_BROCHURE)
     return {"new": new, "seen": seen, "outside": outside, "total": len(rows), "year": rows[0]["start"][:4] if rows else None}
 
-# ----------------------------------------------------------- visitors bureaus with published event data
-# Checked 2026-10-30 across the 22 counties: only Athens publishes a usable event feed. Others have blog-post RSS only (no event dates) or none.
-# `delay` is the Crawl-delay in the site's robots.txt.
-CVB_SOURCES = [{"id": "cvb:athens", "name": "Athens County Visitors Bureau", "county": "Athens", "kind": "tribe", "url": "https://athensohio.com", "delay": 10}]
-
-def fetch_tribe_events(source_id, base_url, county, keywords=None, exclude=None, today=None, delay=10.0, per_page=50, max_pages=12, get=_http_get, sleep=time.sleep):
-    """Read a WordPress 'The Events Calendar' site's public JSON (upcoming events, paged) and store the festival-like ones as candidates. Words are
-    matched against the event's web address and title, as for Experience Columbus. Returns {'new', 'seen', 'total', 'skipped'}."""
-    today = today or dt.date.today(); con = db.connect()
-    kw = [k.lower() for k in (keywords or DEFAULT_KEYWORDS)]; ex = [x.lower() for x in (DEFAULT_EXCLUDE if exclude is None else exclude)]
-    new = seen = skipped = total = 0; page = 1
-    while page <= max_pages:
-        if page > 1: sleep(delay)
-        data = json.loads(get(f"{base_url.rstrip('/')}/wp-json/tribe/events/v1/events?per_page={per_page}&page={page}&start_date={today.isoformat()}"))
-        for e in data.get("events", []):
-            title = html.unescape(e.get("title") or "").strip(); url = e.get("url") or base_url
-            hay = (url.rstrip("/").rsplit("/", 1)[-1] + " " + title.lower().replace(" ", "-"))
-            if not title or not e.get("start_date") or not any(k in hay for k in kw) or any(x in hay for x in ex): skipped += 1; continue
-            start, end = e["start_date"][:10], (e.get("end_date") or e["start_date"])[:10]
-            if end < today.isoformat(): skipped += 1; continue
-            v = e.get("venue") or {}; v = v if isinstance(v, dict) else {}
-            seen += 1; new += db.upsert_candidate(con, source_id, str(e.get("id") or url), title, start, max(end, start), v.get("city") or "", county, url)
-        total = data.get("total", total)
-        if page >= int(data.get("total_pages") or 1): break
-        page += 1
-    return {"new": new, "seen": seen, "total": total, "skipped": skipped}
-
-# ------------------------------------------------------------------------------------------- ohio.org
-OHIO_ORG = "https://ohio.org"
-OHIO_ORG_MAX_DAYS = 21           # longer than this is a standing listing, not a festival or fair
-OHIO_ORG_LIMIT = 10000          # the site's search will not page past its 10,000th result
-OHIO_ORG_SEARCH = OHIO_ORG + "/wps/odx-common/content/search/tourism.en?from=0&size=5000&q=authoringTemplate%3Aevent"
-
-def _ohio_date(v):
-    """Event date from ohio.org's startDate/endDate: epoch milliseconds or an ISO string. Its times of day are unreliable placeholders (02:00-03:00),
-    so only the date is used: the UTC date of an epoch, or the date part of a string."""
-    if isinstance(v, (int, float)) or (isinstance(v, str) and v.strip().isdigit()):
-        return dt.datetime.fromtimestamp(float(v) / 1000, dt.timezone.utc).date().isoformat()
-    m = re.match(r"(\d{4}-\d{2}-\d{2})", str(v or ""))
-    return m[1] if m else None
-
-def parse_ohio_org(data, keywords=None, exclude=None, max_days=OHIO_ORG_MAX_DAYS):
-    """ohio.org search JSON (or its text) -> [{uid, title, start, end, city, zip, url, topics}] for festival-like events. An event is kept when its web
-    address or title contains a festival word, or its topics include 'fairs' or 'festivals'; exclusion words always win. Events with no readable dates or
-    no ZIP in the address are dropped, and so is anything that runs longer than `max_days` (the site also lists permanent attractions and restaurants as
-    "events" with end dates decades away; the longest real fair in the state, the Ohio State Fair, is 12 days)."""
-    if isinstance(data, str):
-        try: data = json.loads(data)
-        except ValueError: raise ValueError("ohio.org did not return event data (it may be refusing automated requests)")
-    kw = [k.lower() for k in (keywords or DEFAULT_KEYWORDS)]; ex = [x.lower() for x in (DEFAULT_EXCLUDE if exclude is None else exclude)]
-    out = []
-    for h in ((data.get("hits") or {}).get("hits") or []):
-        src = h.get("_source") or {}; el = src.get("elements") or {}
-        title = html.unescape(src.get("title") or "").strip(); path = src.get("contentPath") or ""
-        start, end = _ohio_date(el.get("startDate")), _ohio_date(el.get("endDate"))
-        z = re.search(r"\b(\d{5})(?:-\d{4})?\s*$", (el.get("address") or "").strip())
-        if not (title and start and z): continue
-        if (dt.date.fromisoformat(max(end or start, start)) - dt.date.fromisoformat(start)).days > max_days: continue
-        topics = " ".join(t.rsplit("/", 1)[-1] for t in (el.get("topics") or "").split("|")).lower()
-        slug = path.rstrip("/").rsplit("/", 1)[-1].lower(); hay = slug + " " + title.lower().replace(" ", "-")
-        if any(x in hay for x in ex) or not (any(k in hay for k in kw) or "fair" in topics or "festival" in topics): continue
-        tail = path.split("/tourism/", 1)[1] if "/tourism/" in path else ""
-        city = (el.get("cities") or "").split("|")[0].rsplit("/", 1)[-1]
-        out.append({"uid": h.get("_id") or path or title, "title": title, "start": start, "end": max(end or start, start), "city": city, "zip": z[1],
-                    "url": f"{OHIO_ORG}/{tail}" if tail else OHIO_ORG, "topics": topics})
-    return out
-
-def ohio_org_page(start, size):
-    """One page of the event search, longest-running end date first (the site honors `sort` but refuses date filters, which return a 500)."""
-    return f"{OHIO_ORG}/wps/odx-common/content/search/tourism.en?from={start}&size={size}&q=authoringTemplate%3Aevent&sort=elements.endDate%3Adesc"
-
-def fetch_ohio_org(counties=None, keywords=None, exclude=None, today=None, get=_http_get, sleep=time.sleep, size=1000):
-    """Read ohio.org's event search a page at a time (`size` events, a second apart) and propose the festival-like upcoming ones in the chosen counties.
-    Pages come newest end date first, so reading stops as soon as a page reaches events that are already over; the first handful are standing listings
-    with end dates decades out, which parse_ohio_org drops. If the site stops honoring `sort` (hits carry no 'sort' value) the list is oldest to newest and
-    cut off at 10,000, so the newest events may be unreachable: 'capped' is then True and the app says so.
-    Returns {'new','seen','total','outside','capped'}."""
-    counties = set(counties or MARKET_COUNTIES); today = today or dt.date.today(); con = db.connect(); hits = []; ordered = True; reached_past = False
-    today_ms = int(dt.datetime(today.year, today.month, today.day, tzinfo=dt.timezone.utc).timestamp() * 1000)
-    for start in range(0, OHIO_ORG_LIMIT, size):
-        if start: sleep(1.0)
-        got = (json.loads(get(ohio_org_page(start, size))).get("hits") or {}).get("hits") or []
-        hits += got
-        if start == 0 and got and "sort" not in got[0]: ordered = False
-        if ordered and got and isinstance(got[-1].get("sort", [None])[0], (int, float)) and got[-1]["sort"][0] < today_ms: reached_past = True; break
-        if len(got) < size: reached_past = True; break
-    new = seen = outside = 0
-    for e in parse_ohio_org({"hits": {"hits": hits}}, keywords, exclude):
-        if e["end"] < today.isoformat(): continue
-        county = county_for_zip(e["zip"])
-        if county not in counties: outside += 1; continue
-        seen += 1; new += db.upsert_candidate(con, "ohio_org", e["uid"], e["title"], e["start"], e["end"], e["city"], county, e["url"])
-    return {"new": new, "seen": seen, "total": len(hits), "outside": outside, "capped": not reached_past}
-
 # ------------------------------------------------------------------------------- iCal feeds
 def parse_ics(text):
     """Minimal iCalendar reader: VEVENTs -> [{uid, title, start, end (inclusive), location, url}]. All-day DTEND is exclusive in iCal, so one day is
@@ -286,5 +187,4 @@ def accept(con, cand_id):
     eid = db.add_event(con, c["title"], c["start_date"], c["end_date"], cat, location=where, notes=notes, url=c["url"], flag="confirm dates")
     db.decide_candidate(con, cand_id, "accepted", eid); return eid
 
-SOURCE_NAMES = {"experience_columbus": "Experience Columbus (event pages)", "oda_fairs": "Ohio Department of Agriculture fair schedule", "ohio_org": "ohio.org (TourismOhio)"}
-SOURCE_NAMES.update({c["id"]: c["name"] + " (event calendar)" for c in CVB_SOURCES})
+SOURCE_NAMES = {"experience_columbus": "Experience Columbus (event pages)", "oda_fairs": "Ohio Department of Agriculture fair schedule"}

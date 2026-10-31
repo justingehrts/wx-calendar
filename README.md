@@ -111,19 +111,13 @@ county and a "confirm dates" note. Counties come from the event's ZIP code (a ZI
   every county fair and the independent fairs, with dates. `agri.ohio.gov` refuses automated downloads, so upload the year's brochure in Sources (ODA
   publishes it each December); a copy of the 2026 one is bundled in `reference/`. The 2026 brochure covers all 22 counties (25 fairs). Fairs already over are
   skipped unless you tick the box.
-- **ohio.org Festivals & Events** (TourismOhio): the site's pages load every event from one public JSON search; the app makes that single request (the path
-  is not covered by its robots.txt), keeps events whose address ZIP falls in your counties and whose title/address has a festival-like word or whose topic is
-  fairs/festivals, and proposes them. **Checked against five real records, not the live site**: ohio.org returns an error page to automated requests from some networks (it did from
-  the build server). The response shape matches sample records pasted from the site (epoch-millisecond dates at 07:00 UTC, ZIP last in the address). The site refuses date filters (a 500 error) but honors a sort, so the app asks for events
-  newest end date first and stops as soon as it reaches events that are over (a few thousand records at most, 1,000 per request, a second apart). Standing
-  listings (restaurants, tours and attractions entered as events with end dates decades away) and anything running longer than 21 days are dropped. If the
-  site ever stops honoring the sort, the app falls back to the oldest-first list, which is cut off at 10,000 events, and says the newest may be missing. Only the date of each event is used (its times of day
-  are placeholders; WinterFest Columbus is one day despite a weekly hours table on its page). If the button reports an error, the site is refusing the request.
-- **Visitors-bureau event data** (checked 2026-10-30, all 22 counties): only **Athens County** publishes a usable event feed (The Events Calendar's public
-  JSON, read 50 events at a time, 10 seconds apart as its robots.txt asks, festival-like words only). The others have no calendar feed: Franklin
-  (Experience Columbus, above); Fairfield, Guernsey and Madison publish an "events" RSS whose dates are only in the text or title, and Coshocton, Ross and Perry's
-  county site publish blog-post or government-meeting feeds. Delaware, Hocking, Knox, Licking, Marion, Morgan, Muskingum and Pike have visitor sites with no feed at the usual
-  addresses. No official bureau site was found for Crawford, Fayette, Hardin, Morrow, Pickaway or Union. If a bureau gives you an `.ics` address, add it under Calendar feeds.
+- **Visitors-bureau calendars** (checked 2026-10-30, all 22 counties): none offers a feed worth a dedicated connector. Athens County publishes an iCal and a JSON
+  event API (only 1 of its 218 upcoming events was festival-like); Fairfield, Guernsey and Madison publish an "events" RSS whose dates are only in the text or title;
+  Coshocton, Ross and Perry's county site publish blog-post or government-meeting feeds; Franklin is Experience Columbus (above). Delaware, Hocking, Knox, Licking,
+  Marion, Morgan, Muskingum and Pike have visitor sites with no feed at the usual addresses, and no official bureau site was found for Crawford, Fayette, Hardin,
+  Morrow, Pickaway or Union. If a bureau gives you an `.ics` address, add it under Calendar feeds.
+- **Not built** (tried and dropped as more than this needs): an ohio.org connector (its event search works, but only with a sort, never a date filter, and the
+  site refuses requests from some networks) and an Athens-specific connector. Both are in the git history before the commit that removed them.
 
 ## Layout
     app.py                  Streamlit UI + passcode gate
