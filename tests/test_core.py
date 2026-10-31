@@ -708,3 +708,19 @@ def test_table_changes_keep_repeating_dates_on_their_rule():
     assert ch["skipped"] == 1 and ch["adds"] == [("Staff party", "2026-12-18", None, 10)] and ch["deletes"] == []
     assert views.table_changes(rows, {"deleted_rows": [1]}, {})["deletes"] == [1]
     assert views.fmt_span(dt.date(2026, 12, 13), dt.date(2026, 12, 14)) == "Dec 13–14, 2026" and views.fmt_span("2026-12-30", "2027-01-02") == "Dec 30, 2026 – Jan 2, 2027"
+
+def test_holidays_are_proposed_one_by_one_through_review(con):
+    assert db.holiday_proposals(con) == []                                           # nothing proposed until sets are chosen
+    db.set_setting(con, "holiday_sets", ["federal", "christian"])
+    props = db.holiday_proposals(con); titles = [p["title"] for p in props]
+    assert len(props) == 15 and titles.count("Christmas") == 1 and props[0]["set"]       # Christmas is in both sets: asked once
+    db.add_event(con, "Thanksgiving", "2026-01-01", None, rule={"kind": "yearly_nth_weekday", "month": 11, "weekday": 3, "n": 4})
+    assert "Thanksgiving" not in [p["title"] for p in db.holiday_proposals(con)]         # already on the calendar: not proposed
+    by = {p["title"]: p for p in db.holiday_proposals(con)}
+    eid = db.accept_holiday(con, by["Easter"]); db.reject_holiday(con, by["Christmas"])
+    e = db.get_event(con, eid)
+    assert e["rule"]["kind"] == "easter_relative" and e["category"] == "Holidays"
+    left = [p["title"] for p in db.holiday_proposals(con)]
+    assert "Easter" not in left and "Christmas" not in left and len(left) == 12
+    db.delete_event(con, eid); assert "Easter" not in [p["title"] for p in db.holiday_proposals(con)]   # trashed: not proposed again
+    assert len(db.holiday_proposals(con, [])) == 0                                    # unticking every set clears Review

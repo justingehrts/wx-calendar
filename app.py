@@ -4,7 +4,7 @@ import streamlit as st
 from calendar_core import astro, climo, db, holidays, ical, importers, meteors, milestones, patterns, preview, recurrence, regional, views, render_pdf as R
 
 st.set_page_config(page_title="Weathercast Planning Calendar", layout="wide")
-APP_VERSION = "2026-10-31a"
+APP_VERSION = "2026-10-31b"
 
 # Hosted database settings may come from Streamlit secrets; the storage layer reads the environment.
 for _k in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
@@ -175,8 +175,9 @@ counties = db.get_setting(con, "market_counties", regional.MARKET_COUNTIES)
 SOURCE_LABEL = {"oda_fairs": "Fair schedule", "experience_columbus": "Experience Columbus"}
 def cand_source(c): return SOURCE_LABEL.get(c["source"], "Calendar feeds" if c["source"].startswith("ics:") else c["source"])
 pend = milestones.pending(con, year)
+hols = db.holiday_proposals(con)
 cands = [c for c in db.candidates(con, "new") if c["county"] in counties or not c["county"]]
-waiting = len(pend) + len(cands)
+waiting = len(pend) + len(hols) + len(cands)
 
 tab_cal, tab_ev, tab_rev, tab_src, tab_set = st.tabs(["Calendar", "Events", f"Review ({waiting})" if waiting else "Review", "Sources", "Setup"])
 
@@ -267,9 +268,14 @@ with tab_rev:
             st.session_state["msg"] = ("success", f"Moved {n} event(s) to the trash (restorable). Corrected proposals are below."); st.rerun()
     items = [{"kind": "m", "obj": r, "dates": fmt_span(r["date"], r["end"]), "title": r["title"], "source": "Sun, sky & climate", "category": r["category"],
               "county": "", "dup": "", "link": None} for r in pend]
+    def hol_dates(rule):
+        ds = recurrence.dates_for_rule(rule, year) or recurrence.next_occurrences(rule, dt.date(year, 1, 1), 1)
+        return fmt_span(min(ds), max(ds)) if ds else "(no date found)"
+    items += [{"kind": "h", "obj": h, "dates": hol_dates(h["rule"]), "title": h["title"], "source": "Holidays", "category": "Holidays",
+               "county": "", "dup": "", "link": None} for h in hols]
     items += [{"kind": "c", "obj": c, "dates": fmt_span(c["start_date"], c["end_date"]), "title": c["title"], "source": cand_source(c), "category": regional.CATEGORY,
                "county": c["county"] or "", "dup": "yes" if db.likely_duplicates(con, c) else "", "link": c["url"]} for c in cands]
-    srcs = ["All", "Sun, sky & climate", "Fair schedule", "Experience Columbus", "Calendar feeds"]
+    srcs = ["All", "Holidays", "Sun, sky & climate", "Fair schedule", "Experience Columbus", "Calendar feeds"]
     count = {s: len(items) if s == "All" else sum(1 for i in items if i["source"] == s) for s in srcs}
     src = st.pills("Source", srcs, default="All", key="rv_src", format_func=lambda s: f"{s} {count[s]}", label_visibility="collapsed") or "All"
     shown = [i for i in items if src == "All" or i["source"] == src]
@@ -288,8 +294,10 @@ with tab_rev:
             n = 0
             for k, r in red.iterrows():
                 it = shown[k]
-                if r["decision"] == "Accept": (milestones.accept(con, it["obj"]) if it["kind"] == "m" else regional.accept(con, it["obj"]["id"])); n += 1
-                elif r["decision"] == "Reject": (milestones.reject(con, it["obj"]) if it["kind"] == "m" else db.decide_candidate(con, it["obj"]["id"], "rejected")); n += 1
+                if r["decision"] == "Accept":
+                    {"m": lambda o: milestones.accept(con, o), "h": lambda o: db.accept_holiday(con, o), "c": lambda o: regional.accept(con, o["id"])}[it["kind"]](it["obj"]); n += 1
+                elif r["decision"] == "Reject":
+                    {"m": lambda o: milestones.reject(con, o), "h": lambda o: db.reject_holiday(con, o), "c": lambda o: db.decide_candidate(con, o["id"], "rejected")}[it["kind"]](it["obj"]); n += 1
             st.session_state["rv_fill"] = ""; snapshot(); st.session_state["msg"] = ("success", f"Applied {n} decision(s)"); st.rerun()
         b2.button("Accept all shown", on_click=prefill, args=("Accept",), help="Fills in 'Accept' for every row; press Apply decisions to confirm.")
         b3.button("Reject all shown", on_click=prefill, args=("Reject",), help="Fills in 'Reject' for every row; press Apply decisions to confirm.")
@@ -301,25 +309,26 @@ with tab_rev:
 
 # ------------------------------------------------------------------ Sources: where calendar entries come from
 with tab_src:
-    st.caption("Holidays go straight onto the calendar as repeating events. Every other source sends proposals to the Review tab first.")
+    st.caption("Where calendar entries come from. Every source sends proposals to the Review tab, where you accept or reject each one.")
     col1, col2 = st.columns(2, gap="medium")
     with col1:
         with st.container(border=True):
-            st.markdown("**Holidays** · adds directly")
-            st.caption("Pick the sets you want. They repeat every year on their own, so this is a one-time setup.")
+            st.markdown("**Holidays** · to Review")
+            st.caption("Pick the sets to look through. Each holiday shows up in Review once; the ones you accept repeat every year on their own.")
             have = {e["title"] for e in st.session_state["snap"] if is_rule(e)}
-            loaded = [k for k, v in holidays.HOLIDAY_SETS.items() if all(t in have for t, _ in v[2])]
+            proposed = db.get_setting(con, "holiday_sets", [])
             hc = st.columns(2)
-            chosen = [k for i, k in enumerate(holidays.HOLIDAY_SETS) if hc[i % 2].checkbox(holidays.HOLIDAY_SETS[k][0], k in holidays.DEFAULT_SETS or k in loaded, key=f"hs{k}",
+            chosen = [k for i, k in enumerate(holidays.HOLIDAY_SETS) if hc[i % 2].checkbox(holidays.HOLIDAY_SETS[k][0], k in proposed, key=f"hs{k}",
                                                                                           help=holidays.HOLIDAY_SETS[k][1])]
             if chosen:
                 with st.expander(f"Preview the dates for {year}"):
-                    st.dataframe(pd.DataFrame([{"set": holidays.HOLIDAY_SETS[k][0], "holiday": t, "dates": recurrence.format_dates(recurrence.dates_for_rule(rule, year)) or "(none this year)"}
-                                               for k in chosen for t, rule in holidays.HOLIDAY_SETS[k][2]]), hide_index=True, width="stretch")
-            if st.button("Add selected sets", type="primary", disabled=not chosen):
-                added = db.load_holidays(con, chosen); snapshot(); total = sum(added.values())
-                st.session_state["msg"] = ("success", f"Added {total} holiday(s)" if total else "They are all already on the calendar"); st.rerun()
-            st.caption(("On the calendar: " + ", ".join(holidays.HOLIDAY_SETS[k][0] for k in loaded) + ". " if loaded else "") + "Nothing is added twice.")
+                    st.dataframe(pd.DataFrame([{"set": holidays.HOLIDAY_SETS[k][0], "holiday": t, "dates": recurrence.format_dates(recurrence.dates_for_rule(rule, year)) or "(none this year)",
+                                                "on calendar": "yes" if t in have else ""} for k in chosen for t, rule in holidays.HOLIDAY_SETS[k][2]]), hide_index=True, width="stretch")
+            if st.button("Send to Review", type="primary", disabled=sorted(chosen) == sorted(proposed)):
+                db.set_setting(con, "holiday_sets", chosen); n = len(db.holiday_proposals(con, chosen))
+                st.session_state["msg"] = ("success", f"{n} holiday(s) waiting in Review" if n else "Nothing new: those holidays are already on the calendar or were decided" if chosen else "Holiday proposals cleared from Review"); st.rerun()
+            st.caption(f"{len({t for v in holidays.HOLIDAY_SETS.values() for t, _ in v[2] if t in have})} holidays on the calendar · {len(hols)} waiting in Review. "
+                       "Holidays already added, accepted or rejected aren't proposed again.")
             retired = db.retired_holidays(con)
             if retired:
                 st.warning(f"{len(retired)} holiday entr{'y' if len(retired) == 1 else 'ies'} you added earlier {'is' if len(retired) == 1 else 'are'} no longer in the holiday lists: "

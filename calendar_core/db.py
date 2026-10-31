@@ -344,6 +344,31 @@ def load_holidays(con, set_keys=("federal",)):
         added[key] = n
     return added
 
+def holiday_proposals(con, set_keys=None):
+    """Holidays from the chosen sets (default: the 'holiday_sets' setting) that are waiting in Review: not already on the calendar as a
+    repeating event (trash included) and not accepted or rejected before. Each holiday is asked about once, not every year.
+    Returns [{key, title, rule, flag, set}] in set order, each title once."""
+    from . import holidays
+    set_keys = get_setting(con, "holiday_sets", []) if set_keys is None else set_keys
+    have = {e["title"] for e in events(con, include_deleted=True) if e["rule"]}
+    seen = milestone_status(con); out, titles = [], set()
+    for k in set_keys:
+        if k not in holidays.HOLIDAY_SETS: continue
+        label, _, items, flag = holidays.HOLIDAY_SETS[k]
+        for title, rule in items:
+            key = f"holiday:{title}"
+            if title in have or title in titles or key in seen: continue
+            titles.add(title); out.append({"key": key, "title": title, "rule": rule, "flag": flag, "set": label})
+    return out
+
+def accept_holiday(con, item):
+    """Add a proposed holiday as a repeating event (category Holidays) and remember the decision. Returns the event id."""
+    cid = category_id_by_name(con, "Holidays") or categorize(con, "Holiday")
+    eid = add_event(con, item["title"], f"{dt.date.today().year}-01-01", None, cid, rule=item["rule"], flag=item["flag"])
+    decide_milestone(con, item["key"], "accepted", eid); return eid
+
+def reject_holiday(con, item): decide_milestone(con, item["key"], "rejected")
+
 def retired_holidays(con):
     """Events that earlier versions of the holiday sets created and that are no longer offered (title and rule both match)."""
     from . import holidays

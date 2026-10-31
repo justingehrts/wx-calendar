@@ -13,9 +13,9 @@ The app has five tabs. The month and year at the top choose what you are looking
 - **Events**: every event, filtered by month, year or all, category, one-time or repeating, and title. Repeating events show their real date
   (the next one, or the one in the period shown). Tick 'details' on a row for time, location, notes, link and the repeat rule (with its next
   three dates). Add event, CSV import/export and legacy Excel import.
-- **Review**: everything the app proposes, from every source (sun, sky and climate milestones, the fair schedule, Experience Columbus,
+- **Review**: everything the app proposes, from every source (holidays, sun, sky and climate milestones, the fair schedule, Experience Columbus,
   calendar feeds), with a source filter, an 'already on calendar' check, accept-all/reject-all and one Apply button. The tab shows how many are waiting.
-- **Sources**: holiday sets (added straight to the calendar), climate and meteor data refreshes, the fair schedule, Experience Columbus,
+- **Sources**: holiday sets (each holiday is proposed in Review), climate and meteor data refreshes, the fair schedule, Experience Columbus,
   calendar feeds and the counties to include.
 - **Setup**: categories (color + black-and-white pattern per category, contrast check, legend preview in color and B&W), preparing next
   year, history and trash with undo, and database backup.
@@ -43,7 +43,7 @@ secrets are present; without them it uses a local file, which is what you want o
        TURSO_AUTH_TOKEN = "the-token-from-step-1"
 
    Set the app to *Private* (viewers must sign in) if your plan allows it, otherwise the passcode is the only gate.
-3. **First run**: open Events > Import / export and import `Content_Idea_Calendar.xlsx`, then Settings > add the federal holidays.
+3. **First run**: open Events > Import / export and import `Content_Idea_Calendar.xlsx`, then Sources > Holidays > Send to Review and accept the ones you want.
    If the app shows a red "running without a hosted database" banner, the secrets are missing or misspelled.
 4. **Backups**: the Setup tab downloads a copy of the database any time. For automatic nightly copies, add the same two
    Turso values as *repository* secrets (GitHub > Settings > Secrets and variables > Actions); `.github/workflows/backup.yml`
@@ -78,28 +78,20 @@ This path is also untested (no Docker daemon in the authoring environment).
   appear after Settings > Refresh.
 - **Climo milestones**: computed from CMHthr daily data (`reference/climo_CMHthr_stats_v2.json`). Averages are mean dates over the 30 years 1991-2020 (the same first/last pairing as xmACIS: first snow after Jul 1 of each year, last snow before Jul 1; the fraction of a day is dropped, so a mean of Nov 23.8 prints as Nov 23; checked against xmACIS's measurable-snow table, all 60 dates and the means); earliest/latest use the whole record (1878 on), counting only years with at least 95% data coverage of the relevant window. Thresholds: last/first
   32° freeze (min temp), first/last 80° and 90° day (max temp), first/last measurable (≥0.1") and ≥1" snowfall (seasons Jul 1-Jun 30).
-- **Holidays** (Settings > Holidays; every item is a repeat rule, so dates are calculated for any year and nothing is retyped at rollover):
+- **Holidays** (Sources > Holidays: pick the sets, then accept or reject each holiday in Review; each one is asked about once, and an accepted one is a repeat rule, so dates are calculated for any year and nothing is retyped at rollover):
   U.S. federal (actual dates, not "observed" days); Christian (Mardi Gras, Easter, Orthodox Easter, Christmas Eve, Christmas; Easter from the
   standard computus); Jewish (Purim, Passover, Rosh Hashanah, Yom Kippur, Hanukkah, each a single "... begins" marker on the evening it starts,
   i.e. the sundown before its first full day; dates from the Hebrew calendar via `pyluach`, with Purim moving to Adar II in leap years); Muslim
   (Ramadan begins, Eid al-Fitr, Eid al-Adha, predicted from the Umm al-Qura calendar via `hijridate`, valid 1924-2077; the observed day depends
   on moon sighting and can differ by a day, so those events carry a "predicted date: confirm" note in the Events tab and can be overridden with
   'Listed dates per year'); and optional popular observances (Mother's Day, Father's Day, Halloween, and others). Entries added by earlier
-  versions of the lists are detected in Settings and can be moved to the trash in one click.
+  versions of the lists are detected in Sources and can be moved to the trash in one click.
 - **Meteor showers**: peak nights come from the [American Meteor Society's calendar](https://www.amsmeteors.org/calendar/) (Settings > Refresh meteor
   shower peak nights). That page is a rolling window of the next twelve months, so a snapshot is bundled in `reference/meteor_ams.json` and refreshing
   replaces it. Each shower is proposed as a two-night bar (e.g. Oct 21-22) with the Moon on the peak night in the note. Showers or years the AMS page does not
   cover (past showers, or dates more than a year out) fall back to `reference/meteor_showers.json`: verified dates under `"years"` if you add any, otherwise
   *typical* dates, which are clearly labelled "TYPICAL ... NOT verified". If the AMS page layout changes, the refresh refuses to save and keeps the old data;
   a card that cannot be read is reported.
-- **Holidays** (Settings > Holidays; every item is a repeat rule, so dates are calculated for any year and nothing is retyped at rollover):
-  U.S. federal (actual dates, not "observed" days); Christian (Mardi Gras, Easter, Orthodox Easter, Christmas Eve, Christmas; Easter from the
-  standard computus); Jewish (Purim, Passover, Rosh Hashanah, Yom Kippur, Hanukkah, each a single "... begins" marker on the evening it starts,
-  i.e. the sundown before its first full day; dates from the Hebrew calendar via `pyluach`, with Purim moving to Adar II in leap years); Muslim
-  (Ramadan begins, Eid al-Fitr, Eid al-Adha, predicted from the Umm al-Qura calendar via `hijridate`, valid 1924-2077; the observed day depends
-  on moon sighting and can differ by a day, so those events carry a "predicted date: confirm" note in the Events tab and can be overridden with
-  'Listed dates per year'); and optional popular observances (Mother's Day, Father's Day, Halloween, and others). Entries added by earlier
-  versions of the lists are detected in Settings and can be moved to the trash in one click.
 - **Meteor showers**: `reference/meteor_showers.json` has *typical* peak dates. Add verified dates for a year under `"years"`
   (from the IMO or AMS calendar); until then the proposals say "typical date, not verified".
 
