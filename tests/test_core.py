@@ -673,3 +673,38 @@ def test_oda_real_brochure_covers_all_22_counties_and_import_is_reviewed_not_add
     assert any(c["title"] == "Ohio State Fair" and c["county"] == "Franklin" for c in rg.db.candidates(con, "new")) and not rg.db.events(con)
     late = rg.fetch_oda_fairs(pdf, ["Fairfield"], today=dt.date(2026, 10, 18)); assert late["seen"] == 0   # Fairfield ended Oct 17: nothing to propose
     assert rg.fetch_oda_fairs(pdf, ["Fairfield"], today=dt.date(2026, 10, 18), include_past=True)["seen"] == 1
+
+# ------------------------------------------------------------------- event tables (views)
+def _ev(i, title, start, end=None, rule=None, cat="Holidays"):
+    return {"id": i, "title": title, "start_date": start, "end_date": end, "rule": rule, "category": cat, "updated_at": "t", "flag": None}
+
+def test_event_rows_show_real_dates_for_repeating_events():
+    from calendar_core import views
+    evs = [_ev(1, "Christmas", "2026-01-01", rule={"kind": "yearly_fixed", "month": 12, "day": 25}),          # stored on the 1/1 placeholder
+           _ev(2, "Thanksgiving", "2026-01-01", rule={"kind": "yearly_nth_weekday", "month": 11, "weekday": 3, "n": 4}),
+           _ev(3, "WinterFest Columbus", "2026-11-21", cat="Festivals"), _ev(4, "Leonids peak night", "2026-11-17", "2026-11-18", cat="Sky")]
+    today = dt.date(2026, 10, 31)
+    nov = views.event_rows(evs, "This month", 2026, 11, today)
+    assert [(r["ev"]["title"], r["date"], r["through"]) for r in nov] == [("Leonids peak night", dt.date(2026, 11, 17), dt.date(2026, 11, 18)),
+        ("WinterFest Columbus", dt.date(2026, 11, 21), None), ("Thanksgiving", dt.date(2026, 11, 26), None)]
+    year = views.event_rows(evs, "This year", 2026, 11, today)
+    assert year[-1]["ev"]["title"] == "Christmas" and year[-1]["date"] == dt.date(2026, 12, 25)                  # not 1/1
+    assert views.event_rows(evs, "This year", 2027, 11, today)[0]["ev"]["title"] == "Thanksgiving"               # one-offs stay in their own year
+    alls = {r["ev"]["title"]: r["date"] for r in views.event_rows(evs, "All", 2026, 11, dt.date(2026, 12, 26))}
+    assert alls["Christmas"] == dt.date(2027, 12, 25) and alls["WinterFest Columbus"] == dt.date(2026, 11, 21)   # repeating: next date; one-off: its date
+    assert [r["ev"]["title"] for r in views.event_rows(evs, "This year", 2026, 11, today, kind="Repeating only")] == ["Thanksgiving", "Christmas"]
+    assert [r["ev"]["title"] for r in views.event_rows(evs, "This year", 2026, 11, today, cat="Festivals")] == ["WinterFest Columbus"]
+    assert [r["ev"]["title"] for r in views.event_rows(evs, "All", 2026, 11, today, text="peak")] == ["Leonids peak night"]
+
+def test_table_changes_keep_repeating_dates_on_their_rule():
+    from calendar_core import views
+    rows = views.event_rows([_ev(1, "Christmas", "2026-01-01", rule={"kind": "yearly_fixed", "month": 12, "day": 25}),
+                             _ev(2, "WinterFest Columbus", "2026-11-21", cat="Festivals")], "This year", 2026, 11, dt.date(2026, 10, 31))
+    state = {"edited_rows": {"0": {"date": "2026-11-22", "title": "WinterFest", "details": True},          # one-off: date and title change; tick ignored
+                             "1": {"date": "2026-12-26", "category": "Festivals"}},                       # repeating: date skipped, category kept
+             "deleted_rows": [], "added_rows": [{"title": "Staff party", "date": "2026-12-18", "category": "Holidays"}, {"title": "", "date": "2026-12-19"}]}
+    ch = views.table_changes(rows, state, {"Holidays": 10, "Festivals": 11})
+    assert ch["updates"] == [(rows[0]["ev"], {"start_date": "2026-11-22", "title": "WinterFest"}), (rows[1]["ev"], {"category_id": 11})]
+    assert ch["skipped"] == 1 and ch["adds"] == [("Staff party", "2026-12-18", None, 10)] and ch["deletes"] == []
+    assert views.table_changes(rows, {"deleted_rows": [1]}, {})["deletes"] == [1]
+    assert views.fmt_span(dt.date(2026, 12, 13), dt.date(2026, 12, 14)) == "Dec 13–14, 2026" and views.fmt_span("2026-12-30", "2027-01-02") == "Dec 30, 2026 – Jan 2, 2027"

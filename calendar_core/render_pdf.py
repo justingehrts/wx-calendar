@@ -288,7 +288,7 @@ def overflow_messages(report):
             for o in sorted(report["overflow"], key=lambda o: o["date"])]
 
 def legend_preview(cats, bw):
-    """Small PDF with the legend and sample bars for the Categories tab (same drawing code as the page)."""
+    """Small PDF with the legend and sample bars for the Setup tab (same drawing code as the page)."""
     buf = io.BytesIO(); W, H = 560, 20 + 14 * len(cats)
     c = canvas.Canvas(buf, pagesize=(W, H)); c.setFillColor(white); c.rect(0, 0, W, H, fill=1, stroke=0)
     y = H - 16

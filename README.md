@@ -7,13 +7,18 @@ planning calendar (US Letter or A4 landscape, color or black-and-white laser). I
 Location for all sun, moon and climate data: Columbus, OH (39.9612 N, 82.9988 W; climate record: Columbus Area, ACIS threaded station CMHthr). All times Eastern.
 
 ## What it does
-- **Events**: editable table, live month preview, overflow warnings, details panel (time, location, notes, link),
-  repeat rules with a "next 3 occurrences" check, CSV import/export, legacy Excel import, iCal and PNG export.
-- **Categories**: color + black-and-white style per category, contrast check, legend preview in color and B&W.
-- **Milestones**: proposed sun, sky, DST, meteor-shower and climo entries to accept or reject.
-- **History & trash**: every change is logged; undo; deleted events go to the trash.
-- **Settings**: refresh ACIS climate data, add holiday sets (U.S. federal, Christian, Jewish, Muslim, other popular observances), year rollover, database download.
-- **Print options** (sidebar): what shows on each day, color/B&W, grayscale preview, Sunday/Monday start, paper size, smaller bars.
+The app has five tabs. The month and year at the top choose what you are looking at and printing.
+- **Calendar**: the month's events as an editable table next to the live print preview; downloads (PDF, all 12 months, PNG, iCal) and print
+  settings (what shows on each day, color/B&W, grayscale preview, Sunday/Monday start, paper size, smaller bars).
+- **Events**: every event, filtered by month, year or all, category, one-time or repeating, and title. Repeating events show their real date
+  (the next one, or the one in the period shown). Tick 'details' on a row for time, location, notes, link and the repeat rule (with its next
+  three dates). Add event, CSV import/export and legacy Excel import.
+- **Review**: everything the app proposes, from every source (sun, sky and climate milestones, the fair schedule, Experience Columbus,
+  calendar feeds), with a source filter, an 'already on calendar' check, accept-all/reject-all and one Apply button. The tab shows how many are waiting.
+- **Sources**: holiday sets (added straight to the calendar), climate and meteor data refreshes, the fair schedule, Experience Columbus,
+  calendar feeds and the counties to include.
+- **Setup**: categories (color + black-and-white pattern per category, contrast check, legend preview in color and B&W), preparing next
+  year, history and trash with undo, and database backup.
 - The PDF never silently drops an event: anything that does not fit is listed on the app screen and on the details page.
 
 ## Run locally
@@ -40,7 +45,7 @@ secrets are present; without them it uses a local file, which is what you want o
    Set the app to *Private* (viewers must sign in) if your plan allows it, otherwise the passcode is the only gate.
 3. **First run**: open Events > Import / export and import `Content_Idea_Calendar.xlsx`, then Settings > add the federal holidays.
    If the app shows a red "running without a hosted database" banner, the secrets are missing or misspelled.
-4. **Backups**: the Settings tab downloads a copy of the database any time. For automatic nightly copies, add the same two
+4. **Backups**: the Setup tab downloads a copy of the database any time. For automatic nightly copies, add the same two
    Turso values as *repository* secrets (GitHub > Settings > Secrets and variables > Actions); `.github/workflows/backup.yml`
    then saves a copy as a workflow artifact every night (kept 30 days; GitHub pauses scheduled runs on repos idle for 60 days).
    A backup file is a normal SQLite file; open it with any SQLite tool or restore by importing its events.
@@ -98,7 +103,7 @@ This path is also untested (no Docker daemon in the authoring environment).
 - **Meteor showers**: `reference/meteor_showers.json` has *typical* peak dates. Add verified dates for a year under `"years"`
   (from the IMO or AMS calendar); until then the proposals say "typical date, not verified".
 
-## Regional festivals and fairs (Regional events tab)
+## Regional festivals and fairs (Sources and Review tabs)
 For outdoor festivals and fairs across the 22 counties in the Columbus and Zanesville markets. Sources only **propose** events; you accept or reject
 each one, a rejected one never returns, and accepted ones go in a "Regional festivals & fairs" category (its own black-and-white style) tagged with the
 county and a "confirm dates" note. Counties come from the event's ZIP code (a ZIP that straddles counties gets its primary county).
