@@ -4,7 +4,7 @@ import streamlit as st
 from calendar_core import astro, climo, db, holidays, ical, importers, meteors, milestones, patterns, preview, recurrence, regional, views, render_pdf as R
 
 st.set_page_config(page_title="Weathercast Planning Calendar", layout="wide")
-APP_VERSION = "2026-10-31b"
+APP_VERSION = "2026-11-02a"
 
 # Hosted database settings may come from Streamlit secrets; the storage layer reads the environment.
 for _k in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
@@ -60,7 +60,8 @@ month, year = int(st.session_state["vm"]), int(st.session_state["vy"])
 
 if "msg" in st.session_state:
     kind, text = st.session_state.pop("msg")
-    st.toast(text) if kind == "success" else getattr(st, kind)(text)
+    if kind == "success": st.toast(text)
+    else: getattr(st, kind)(text)
 
 def snapshot():
     st.session_state["snap"] = db.events(con); st.session_state["snap_v"] = st.session_state.get("snap_v", 0) + 1

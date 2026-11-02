@@ -724,3 +724,15 @@ def test_holidays_are_proposed_one_by_one_through_review(con):
     assert "Easter" not in left and "Christmas" not in left and len(left) == 12
     db.delete_event(con, eid); assert "Easter" not in [p["title"] for p in db.holiday_proposals(con)]   # trashed: not proposed again
     assert len(db.holiday_proposals(con, [])) == 0                                    # unticking every set clears Review
+
+def test_app_has_no_bare_expressions_that_streamlit_would_print():
+    """Streamlit 'magic' writes any bare non-call expression in the script to the page (e.g. `a() if x else b()` printed the
+    toast object's help page). Use if-statements instead."""
+    import ast
+    tree = ast.parse(open(os.path.join(os.path.dirname(__file__), "..", "app.py")).read()); bad = []
+    def walk(n, in_func=False):
+        for c in ast.iter_child_nodes(n):
+            f = in_func or isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))
+            if isinstance(c, ast.Expr) and not f and not isinstance(c.value, (ast.Call, ast.Constant)): bad.append((c.lineno, ast.unparse(c)))
+            walk(c, f)
+    walk(tree); assert bad == []
