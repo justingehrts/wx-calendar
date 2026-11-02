@@ -52,6 +52,21 @@ def _fit(c, text, font, size, maxw, floor=4.6):
     while c.stringWidth(text, font, size) > maxw and size > floor: size -= .2
     return size
 
+# Sun and climate lines at the bottom of each day: labels ('rise', 'Nrm') regular, numbers bold, dark enough to read on paper.
+INFO_SIZE, INFO_MIN, INFO_STEP = 6.8, 5.2, 8.0
+SUN_COLOR, CLIMO_COLOR = "#5E4600", "#7A3512"        # about 9:1 against white
+
+def _info_line(c, x, y, text, maxw, color):
+    """Draw 'rise 7:01  set 5:29' with the words regular and the values bold, shrinking (to INFO_MIN) to fit maxw."""
+    import re
+    segs = [(t, "Helvetica" if re.fullmatch(r"[A-Za-z]+", t) else "Helvetica-Bold") for t in re.split(r"(\s+)", text) if t]
+    width = lambda sz: sum(c.stringWidth(t, f, sz) for t, f in segs)
+    size = INFO_SIZE
+    while width(size) > maxw and size > INFO_MIN: size -= .2
+    c.setFillColor(HexColor(color))
+    for t, f in segs:
+        c.setFont(f, size); c.drawString(x, y, t); x += c.stringWidth(t, f, size)
+
 def _truncate(c, text, font, size, maxw):
     if c.stringWidth(text, font, size) <= maxw: return text, False
     while text and c.stringWidth(text + "…", font, size) > maxw: text = text[:-1]
@@ -148,7 +163,7 @@ def month_page(c, year, month, items, cats, opts, report):
     for r, wk in enumerate(weeks):
         ytop = gtop - hdr - r * rh; ybot = ytop - rh
         clim_on = (opts.normals or opts.records)
-        reserve = 4 + 7.2 * (int(clim_on) + int(sun_on))
+        reserve = 4 + INFO_STEP * (int(clim_on) + int(sun_on))
         for i, d in enumerate(wk):
             x = M + i * cw; inm = d.month == month; wkend = d.weekday() in (5, 6)
             c.setFillColor(HexColor("#FFFFFF") if inm and not wkend else HexColor("#F0F0F0" if opts.bw else "#F3F5F8") if inm
@@ -168,14 +183,12 @@ def month_page(c, year, month, items, cats, opts, report):
                 if opts.daylight:
                     ln, ch = astro.daylight(d); parts.append(f"{ln}  {ch}")
                 txt = "   ".join(parts)
-                c.setFillColor(HexColor("#222222" if opts.bw else "#8A6D00"))
-                c.setFont("Helvetica", _fit(c, txt, "Helvetica", 5.4, cw - 8, 4.4)); c.drawString(x + 4, liney, txt)
-            if sun_on: liney += 7.2
+                _info_line(c, x + 4, liney, txt, cw - 8, "#111111" if opts.bw else SUN_COLOR)
+            if sun_on: liney += INFO_STEP
             if clim_on:
                 txt = climo.line(d, opts.records, opts.normals)
                 if not txt: txt = "Nrm --/--"
-                c.setFillColor(HexColor(("#333333" if inm else "#888888") if opts.bw else ("#9a4a1c" if inm else "#A8AEB8")))
-                c.setFont("Helvetica", _fit(c, txt, "Helvetica", 5.4, cw - 8, 4.4)); c.drawString(x + 4, liney, txt)
+                _info_line(c, x + 4, liney, txt, cw - 8, ("#111111" if inm else "#666666") if opts.bw else (CLIMO_COLOR if inm else "#7E8590"))
         # ---- event bars
         lanes = layout_week(wk, items)
         maxl = max(0, int((rh - 19 - reserve) // (bh + 1)))
