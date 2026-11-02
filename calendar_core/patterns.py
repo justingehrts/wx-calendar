@@ -70,3 +70,23 @@ def draw_bar(c, x, y, w, h, text, style, color_hex, bw, size, spill=False):
 
 def draw_swatch(c, x, y, w, h, style, color_hex, bw):
     draw_fill(c, x, y, w, h, style, color_hex, bw)
+
+# ------------------------------------------------------------- color palette for the category picker
+def _hls_hex(h, s, l):
+    import colorsys
+    r, g, b = colorsys.hls_to_rgb(h / 360, l, s); return "#%02x%02x%02x" % tuple(round(x * 255) for x in (r, g, b))
+
+def _at_contrast(h, s, target):
+    """The lightest color of hue h and saturation s that still gives white text at least `target`:1."""
+    lo, hi = 0.0, 1.0
+    for _ in range(40):
+        m = (lo + hi) / 2
+        if white_text_contrast(_hls_hex(h, s, m)) >= target: lo = m
+        else: hi = m
+    return _hls_hex(h, s, lo)
+
+_HUES = [0, 15, 30, 45, 60, 80, 110, 140, 165, 185, 200, 215, 230, 260, 285, 320]
+# rows, light to dark: vivid, deeper, dark, darkest, muted, dark muted; then grays and tinted neutrals. Every color keeps white
+# print text readable (at least 4.5:1), so any pick passes the contrast check.
+PALETTE = [[_at_contrast(h, s, t) for h in _HUES] for s, t in [(0.80, 4.7), (0.65, 6.5), (0.55, 9), (0.45, 12.5), (0.30, 5.5), (0.25, 8.5)]]
+PALETTE.append([_hls_hex(0, 0, l) for l in (0.46, 0.40, 0.34, 0.28, 0.22, 0.16, 0.10, 0.04)] + [_at_contrast(h, 0.18, 7) for h in (20, 40, 90, 150, 200, 240, 280, 340)])

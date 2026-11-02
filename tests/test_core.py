@@ -1,4 +1,4 @@
-import datetime as dt, io, os, threading
+import datetime as dt, io, os, re, threading
 import pypdfium2 as pdfium
 from calendar_core import astro, db, ical, importers, milestones, patterns, preview, recurrence as rc, render_pdf as R
 
@@ -736,3 +736,10 @@ def test_app_has_no_bare_expressions_that_streamlit_would_print():
             if isinstance(c, ast.Expr) and not f and not isinstance(c.value, (ast.Call, ast.Constant)): bad.append((c.lineno, ast.unparse(c)))
             walk(c, f)
     walk(tree); assert bad == []
+
+def test_color_palette_is_readable_with_white_text():
+    from calendar_core import patterns
+    flat = [c for row in patterns.PALETTE for c in row]
+    assert len(flat) == 112 and len(set(flat)) == 112 and all(len(r) == 16 for r in patterns.PALETTE)
+    assert all(re.fullmatch(r"#[0-9a-f]{6}", c) for c in flat)
+    assert min(patterns.white_text_contrast(c) for c in flat) >= 4.5

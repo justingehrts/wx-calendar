@@ -4,7 +4,7 @@ import streamlit as st
 from calendar_core import astro, climo, db, holidays, ical, importers, meteors, milestones, patterns, preview, recurrence, regional, views, render_pdf as R
 
 st.set_page_config(page_title="Weathercast Planning Calendar", layout="wide")
-APP_VERSION = "2026-11-02a"
+APP_VERSION = "2026-11-02b"
 
 # Hosted database settings may come from Streamlit secrets; the storage layer reads the environment.
 for _k in ("TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"):
@@ -38,6 +38,32 @@ if not db.turso_config() and os.path.abspath(__file__).startswith("/mount/src"):
 cats = db.categories(con)
 cat_names = [c["name"] for c in cats]
 cat_by_name = {c["name"]: c for c in cats}
+# A grid of color swatches; clicking one sends its hex code back to Python (used for category colors in Setup).
+_SWATCH_CSS = """
+.grid { display: grid; grid-template-columns: repeat(16, minmax(0, 1fr)); gap: 4px; max-width: 640px; }
+button { aspect-ratio: 1.3; min-height: 20px; border: 0; border-radius: 4px; padding: 0; cursor: pointer; }
+button:hover { transform: scale(1.15); }
+button:focus-visible { outline: 2px solid var(--st-primary-color); outline-offset: 2px; }
+button[aria-pressed="true"] { outline: 3px solid var(--st-text-color); outline-offset: 2px; }
+"""
+_SWATCH_JS = """
+export default function(component) {
+  const { data, parentElement, setTriggerValue } = component;
+  let grid = parentElement.querySelector('.grid');
+  if (!grid) { grid = document.createElement('div'); grid.className = 'grid'; grid.setAttribute('role', 'group');
+               grid.setAttribute('aria-label', 'Colors'); parentElement.appendChild(grid); }
+  grid.replaceChildren();
+  for (const c of data.colors) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.style.background = c; b.title = c; b.setAttribute('aria-label', c);
+    b.setAttribute('aria-pressed', String(c === data.current));
+    b.onclick = () => setTriggerValue('picked', c);
+    grid.appendChild(b);
+  }
+}
+"""
+swatch_grid = st.components.v2.component("color_swatches", css=_SWATCH_CSS, js=_SWATCH_JS)
+
 MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 
 # ------------------------------------------------------------------ month being viewed and printed
@@ -405,7 +431,7 @@ with tab_src:
 with tab_set:
     with st.container(border=True):
         st.markdown("**Categories**")
-        st.caption(f"Type in the table, or add a row at the bottom. Colors are hex codes like #c0392b. 'This month' counts {MONTHS[month - 1]} {year}.")
+        st.caption(f"Type in the table, or add a row at the bottom. Pick colors below the table, or type a hex code like #c0392b. 'This month' counts {MONTHS[month - 1]} {year}.")
         counts = db.category_counts(con, year, month)
         styles = list(patterns.STYLES); label_of = patterns.STYLES; key_of = {v: k for k, v in patterns.STYLES.items()}
         cdf = pd.DataFrame([{"color": c["color_hex"], "name": c["name"], "B&W pattern": label_of[c["bw_style"]], "this month": counts.get(c["id"], 0),
@@ -433,6 +459,17 @@ with tab_set:
                         except Exception as ex: errs.append(str(ex))
                 st.session_state["cats_v"] = st.session_state.get("cats_v", 0) + 1; snapshot()
                 st.session_state["msg"] = ("warning", "; ".join(errs)) if errs else ("success", "Categories saved"); st.rerun()
+            with st.container(border=True):
+                pc1, pc2 = st.columns([2, 3], vertical_alignment="bottom")
+                pick_cat = pc1.selectbox("Pick a color for", cat_names, key="pick_cat")
+                cur = cat_by_name[pick_cat]["color_hex"].lower() if pick_cat else ""
+                pc2.caption(f"Now {cur}{'' if any(cur in r for r in patterns.PALETTE) else ' (typed, not in this palette)'}. "
+                            "Click a color to use it right away. Every color here keeps white print text readable.")
+                res = swatch_grid(data={"colors": [c for r in patterns.PALETTE for c in r], "current": cur}, key="swatches", on_picked_change=lambda: None)
+                if pick_cat and res.picked and res.picked != cur:
+                    db.update_category(con, cat_by_name[pick_cat]["id"], color_hex=res.picked)
+                    st.session_state["cats_v"] = st.session_state.get("cats_v", 0) + 1; snapshot()
+                    st.session_state["msg"] = ("success", f"{pick_cat} is now {res.picked}"); st.rerun()
             for c in cats:
                 ratio = patterns.white_text_contrast(c["color_hex"])
                 if ratio < 4.5: st.warning(f"{c['name']}: white text on {c['color_hex']} is {ratio:.1f}:1, below 4.5:1. Darken the color.")
